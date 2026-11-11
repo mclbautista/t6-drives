@@ -111,7 +111,9 @@ class BrowserTest(unittest.TestCase):
                     ).to_be_visible()
                     page.get_by_label("Unresolved Project text", exact=True).fill("SYN")
                     page.get_by_role("button", name="Add Assignment", exact=True).click()
-                    expect(page.get_by_text("Unresolved: SYN", exact=False)).to_be_visible()
+                    expect(
+                        page.locator("li[data-assignment-id]").filter(has_text="Unresolved: SYN")
+                    ).to_be_visible()
                     expect(
                         page.get_by_role("button", name="End Assignment", exact=True)
                     ).to_have_count(2)
@@ -140,6 +142,26 @@ class BrowserTest(unittest.TestCase):
                         )
                     ).to_be_visible()
                     page.get_by_role("link", name=drive_id, exact=True).click()
+                    expect(page.get_by_role("link", name="Edit", exact=True)).to_be_visible()
+                    page.get_by_role("link", name="Record custody", exact=True).click()
+                    for kind, status in (
+                        ("received", "in custody"),
+                        ("released", "released"),
+                        ("returned", "in custody"),
+                    ):
+                        page.get_by_label("Kind", exact=True).select_option(kind)
+                        page.get_by_role("button", name="Append custody event", exact=True).click()
+                        expect(
+                            page.get_by_text("Custody status: " + status, exact=True)
+                        ).to_be_visible()
+                        expect(page.get_by_text("End: 2024-03-11", exact=False)).to_be_visible()
+                        expect(page.locator("li[data-assignment-id]")).to_have_count(2)
+                        expect(
+                            page.get_by_role("button", name="End Assignment", exact=True)
+                        ).to_have_count(1)
+                        if kind != "returned":
+                            page.get_by_role("link", name="Record custody", exact=True).click()
+                    expect(page.locator("li[data-event-id]")).to_have_count(3)
                     page.screenshot(path=str(artifacts / "edited-detail.png"), full_page=True)
                     self.assertEqual(errors, [])
                     context.tracing.stop(path=str(artifacts / "browser-trace.zip"))

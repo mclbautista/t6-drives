@@ -1,6 +1,29 @@
 # Synthetic verification and remaining evidence
 
-## Ticket #3 checkpoint: Project cache and Assignments
+## Combined tickets #3–4 integration checkpoint
+
+Both reviewed candidates were merged into the existing draft integration branch, #3 before #4. `app.py`, package/typecheck scope and CI conflicts were resolved by retaining both features. `tests/test_integration.py` adds three HTTP/real-SQLite regressions for cache outage plus custody writes, Assignment/custody mutation independence, AND filter intersection, retained navigation, both histories after fact edits/restart, missing/stale revision rejection and unknown ownership/default actor preservation. The Project/text filter regression initially failed because the inherited helper ORed them; independent predicates now intersect their Drive-level results.
+
+The extended Assignment Chromium scenario also follows Record custody and appends receipt/release/return while checking two retained Assignments, one still open. The original independent custody Chromium scenario remains. Integration exposed a broad text locator colliding with the G2 warning and a cross-session whole-page assertion comparing new Assignment CSRF secrets; selectors were scoped to Assignment rows and only CSRF values are normalized for the restart assertion. No history evidence is discarded.
+
+Executed successfully from the integration worktree:
+
+```sh
+.venv/bin/mypy
+# Success: no issues found in 9 source files (check_untyped_defs, not strict)
+BROWSER_ARTIFACTS=/Users/cyrilbautista/.hermes/cache/scratch/drives-implementation/integration-3-4-browser .venv/bin/python -m unittest discover -s tests -v
+# 26 tests passed, including both real Chromium scenarios; no skips
+.venv/bin/ruff check app.py assignments.py custody.py tests
+.venv/bin/ruff format --check app.py assignments.py custody.py tests
+# All checks passed; 9 files already formatted
+.venv/bin/python -m compileall -q app.py assignments.py custody.py tests
+.venv/bin/python -m build
+# sdist and wheel built with app.py, assignments.py and custody.py
+```
+
+Only invented fixtures and disposable stores were used. No push, issue closure, acceptance-checkbox update, main merge, real exports/workbooks or deployment was performed. Independent integration review is still required; remote CI is not claimed green. G1–G5 remain unresolved. This verifies combined synthetic behavior, not whole-parent acceptance, shipment snapshots/imports, production migrations, recovery or operational authorization.
+
+## Ticket #3 candidate checkpoint (historical evidence): Project cache and Assignments
 
 The completed synthetic candidate adds `tests/test_assignments.py` at the approved HTTP/UI + real SQLite seam; only the external Project reader is substituted. The bootstrap scenario uses a real JSON export through `refresh-projects --export`, then exercises successful changed-active/retained-legacy refresh, permanent-ID filtering, sanitized outage/incomplete/missing-binding/rollback failures, unresolved text that equals a code without guessed resolution, and restart persistence. Assignment scenarios cover meaningful no-serial/review-flagged Drives, unknown role/start, repeated labels, concurrent open use, explicit end, invalid date atomicity, repeat-end rejection, unknown Drives, escaped remarks, CSRF/Origin protection and non-mutating GETs. The real Chromium scenario now also navigates cached/unresolved Assignment creation, explicit ending, retained history and open-use inventory filters independently of custody, with no browser console/page errors.
 

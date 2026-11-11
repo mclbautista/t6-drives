@@ -1,4 +1,4 @@
-# Synthetic Drive inventory and Assignments (tickets #2–3)
+# Synthetic Drive inventory, Assignments and custody (tickets #2–4)
 
 A local, server-rendered inventory tracer bullet for **synthetic data only**. Python 3.12 and uv are required. From this directory:
 
@@ -16,10 +16,10 @@ Install the locked development tools and Chromium before running the full suite 
 uv pip install --python .venv/bin/python -r requirements-dev.lock
 .venv/bin/python -m playwright install chromium
 .venv/bin/python -m unittest discover -s tests -v
-.venv/bin/python -m compileall -q app.py assignments.py tests
+.venv/bin/python -m compileall -q app.py assignments.py custody.py tests
 .venv/bin/mypy
-.venv/bin/ruff check app.py assignments.py tests
-.venv/bin/ruff format --check app.py assignments.py tests
+.venv/bin/ruff check app.py assignments.py custody.py tests
+.venv/bin/ruff format --check app.py assignments.py custody.py tests
 .venv/bin/python -m build
 ```
 
@@ -41,4 +41,10 @@ The export contract is `{"complete": true, "projects": [...]}`. Each Project con
 
 Drive details support adding cached-page or unresolved-text Assignments with optional labels, roles, dates and remarks, plus explicit validated ending without rewriting earlier labels. Unknown roles/start dates remain unknown. Open Project use is distinct from custody; inventory Project/text filters select **open** Assignments. Unresolved text is never matched to names/codes. Cache, Assignments and explicit ends survive restart; ordinary use does not call the external reader. `Assignments` is an app-owned interface because pinned core has add/history but no end mutation; it uses core `Assignment`, `Ref`, `Role` and shared date validation rather than claiming to implement the full `DriveStore`.
 
-Custody, shipment history, status filters, imports, general migrations/rollback, backup/restore and deployment are not implemented. Only fresh initialization, additive Assignment/cache tables and revision/ownership columns for earlier synthetic stores are present. G1–G5 (host/access, attribution, write access, recovery, production cutover) remain unresolved; no operational use, real-data rehearsal, production import, workbook freeze or cutover is authorized by this slice. See [evidence](docs/evidence.md).
+## Single-Drive custody
+
+Drive details retain both Assignment forms/history and the Record custody link. Custody records receipt, release, return, retirement and append-only corrections; status is derived in append order, not business-date order. Unknown dates, actors and references remain explicit. Default actor policy is `unknown`; only an explicit `custody_actor_policy="self-declared-synthetic"` factory option accepts self-declared synthetic actor text, which is never authenticated identity. See [custody evidence](docs/custody-evidence.md).
+
+Project-cache refresh failures do not block custody. Adding/ending Assignments does not mutate custody, and receipt/release/return does not close Assignments. Search, exact serial, review, Project, unresolved-text and custody-status filters combine with AND at the Drive level; the two Project-use filters may be satisfied by separate open Assignments. Fact edits retain both histories and reject stale/missing revisions. Unknown ownership stays unknown.
+
+Shipment history, imports, general migrations/rollback, backup/restore and deployment are not implemented. Only fresh initialization, additive Assignment/cache/custody tables and revision/ownership columns for earlier synthetic stores are present. G1–G5 (host/access, attribution, write access, recovery, production cutover) remain unresolved; no operational use, real-data rehearsal, production import, workbook freeze or cutover is authorized by this slice. See [evidence](docs/evidence.md).

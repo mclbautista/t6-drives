@@ -7,6 +7,7 @@ and core review reasons. No browser routes or raw-data diagnostics are installed
 
 import hashlib
 import json
+import re
 from collections import defaultdict
 from dataclasses import asdict, replace
 from io import BytesIO
@@ -177,8 +178,12 @@ class InventoryImports:
                         "SELECT 1 FROM import_receipts WHERE row_key=?", (key,)
                     ).fetchone()
                     cells = json.loads(evidence)
-                    first = str(cells[0] or "").strip().upper() if cells else ""
-                    structural = first == "HARD DRIVE LABEL" or first.startswith("PROJECT NAME")
+                    first = str(cells[0] or "").strip() if cells else ""
+                    # Mirror the pinned core per-project reader's grammar/search;
+                    # it exposes no public structural-row recognizer.
+                    structural = first.upper() == "HARD DRIVE LABEL" or bool(
+                        re.search(r"PROJECT NAME\s*:\s*(.*)", first, re.IGNORECASE | re.DOTALL)
+                    )
                     why = reasons.get(key, [])
                     observation = db.execute(
                         "SELECT reason FROM import_observations WHERE row_key=?", (key,)

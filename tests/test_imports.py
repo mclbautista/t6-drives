@@ -1,5 +1,6 @@
 """Synthetic host import acceptance against SQLite and observable HTTP."""
 
+import json
 import tempfile
 import unittest
 from concurrent.futures import ThreadPoolExecutor
@@ -40,6 +41,63 @@ def complete_state(store):
 
 
 class InventoryImportTests(unittest.TestCase):
+    def test_unattached_project_like_rows_remain_exceptions_after_restart_and_rerun(self):
+        from openpyxl import Workbook
+        from test_assignments import OLD, Reader, export
+
+        from assignments import Assignments
+
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "synthetic.xlsx"
+            database = str(Path(directory) / "private.sqlite")
+            workbook = Workbook()
+            sheet = workbook.active
+            assert sheet is not None
+            sheet.title = "Synthetic Show"
+            sheet.append(["PROJECT NAMELESS synthetic unattached", "SYN-ORPHAN"])
+            sheet.append(["PROJECT NAME missing colon", "SYN-UNATTACHED"])
+            # Core uses a case-insensitive search, not startswith or fullmatch.
+            sheet.append(["prefix project name \t: Synthetic Recognized\nShow"])
+            sheet.append([" hard drive label ", "SERIAL NUMBER"])
+            sheet.append(["Synthetic portable", "SYN-1"])
+            workbook.save(path)
+            workbook.close()
+
+            imports = InventoryImports(database)
+            Assignments(database).refresh(Reader(export(name="Synthetic Recognized\nShow")))
+            imports.run("synthetic", str(path))
+            exceptions = imports.evidence("synthetic")
+            for number, marker in [(1, "SYN-ORPHAN"), (2, "SYN-UNATTACHED")]:
+                with self.subTest(row=number):
+                    evidence = next((e for e in exceptions if e["row"] == number), None)
+                    self.assertIsNotNone(evidence, "Unattached row missing from exception queue")
+                    assert evidence is not None
+                    self.assertEqual(evidence["workbook"], str(path.resolve()))
+                    self.assertEqual(evidence["sheet"], "Synthetic Show")
+                    self.assertIn(marker, json.loads(evidence["evidence"]))
+                    self.assertEqual(evidence["status"], "exception")
+                    self.assertIn(
+                        "Unrecognized source row; not attached",
+                        [reason["reason"] for reason in json.loads(evidence["reasons"])],
+                    )
+            all_rows = imports.evidence("synthetic", exceptions_only=False)
+            for number in (3, 4):
+                heading = next(e for e in all_rows if e["row"] == number)
+                self.assertEqual(heading["status"], "structure")
+                self.assertEqual(json.loads(heading["reasons"]), [])
+            drive = imports.store.find_by_serial("SYN-1")
+            assert drive is not None
+            self.assertEqual(
+                imports.store.assignment_history(drive.id)[0].project.page_id,
+                OLD,
+            )
+            state = complete_state(imports.store)
+            restarted = InventoryImports(database)
+            self.assertEqual(restarted.evidence("synthetic"), exceptions)
+            restarted.run("synthetic", str(path))
+            self.assertEqual(restarted.evidence("synthetic", exceptions_only=False), all_rows)
+            self.assertEqual(complete_state(restarted.store), state)
+
     def test_atomic_match_retains_conflicting_facts_even_if_core_lookup_missed_them(self):
         from t6.drives import Assignment, Ref
 

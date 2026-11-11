@@ -20,6 +20,26 @@ class QuietHandler(WSGIRequestHandler):
         pass
 
 
+def loopback_server(app):
+    """Bind an OS-selected port without changing the production authority guard.
+
+    Translate only this test server's exact authority and same-origin Origin.
+    These UI tests exercise forms/CSRF; HTTP tests cover the real Host guard.
+    """
+    server = make_server("127.0.0.1", 0, app, request_handler=QuietHandler)
+    authority = f"127.0.0.1:{server.server_port}"
+
+    def test_authority(environ, start_response):
+        if environ.get("HTTP_HOST") == authority:
+            environ["HTTP_HOST"] = "127.0.0.1:5000"
+            if environ.get("HTTP_ORIGIN") == f"http://{authority}":
+                environ["HTTP_ORIGIN"] = "http://127.0.0.1:5000"
+        return app(environ, start_response)
+
+    server.app = test_authority
+    return server
+
+
 class BrowserTest(unittest.TestCase):
     def test_navigation_creation_edit_search_and_uncertainty(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -27,12 +47,7 @@ class BrowserTest(unittest.TestCase):
             artifacts.mkdir(parents=True, exist_ok=True)
             app = create_app(str(Path(directory) / "synthetic.sqlite"), Reader(export()))
             self.assertEqual(app.test_cli_runner().invoke(args=["refresh-projects"]).exit_code, 0)
-            server = make_server(
-                "127.0.0.1",
-                5000,
-                app,
-                request_handler=QuietHandler,
-            )
+            server = loopback_server(app)
             thread = threading.Thread(target=server.serve_forever, daemon=True)
             thread.start()
             try:
@@ -49,7 +64,7 @@ class BrowserTest(unittest.TestCase):
                             errors.append(message.text) if message.type == "error" else None
                         ),
                     )
-                    page.goto("http://127.0.0.1:5000/")
+                    page.goto(f"http://127.0.0.1:{server.server_port}/")
                     page.get_by_role("link", name="New Drive").click()
                     expect(page.get_by_label("Ownership", exact=True)).to_have_value("unknown")
                     page.get_by_label("Description", exact=True).fill("synthetic browser drive")

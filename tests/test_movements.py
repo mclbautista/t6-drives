@@ -227,6 +227,7 @@ class MovementTests(unittest.TestCase):
                     "import_sources",
                     "imported_event_sources",
                     "import_observations",
+                    "import_rejections",
                     "import_receipts",
                     "import_evidence",
                 ]

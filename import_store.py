@@ -48,7 +48,9 @@ class SQLiteDriveStore:
         checkpoint: Callable[[str], None] | None = None,
         receipt_keys: dict[str, str] | None = None,
         source_lineage: str | None = None,
+        movement_keys: set[str] | None = None,
     ):
+        self.movement_keys = movement_keys or set()
         self.source_lineage = source_lineage
         self.receipt_keys = receipt_keys
         self.inventory = Inventory(database)
@@ -63,6 +65,8 @@ class SQLiteDriveStore:
                 row_key TEXT PRIMARY KEY, drive_id TEXT NOT NULL REFERENCES drives(id))""")
             db.execute("""CREATE TABLE IF NOT EXISTS import_observations (
                 row_key TEXT PRIMARY KEY REFERENCES import_receipts(row_key), reason TEXT NOT NULL)""")
+            db.execute("""CREATE TABLE IF NOT EXISTS import_rejections (
+                row_key TEXT PRIMARY KEY, reason TEXT NOT NULL)""")
 
     def connect(self) -> sqlite3.Connection:
         db = self.inventory.connect()
@@ -172,6 +176,20 @@ class SQLiteDriveStore:
         with self.connect() as db:
             db.execute("BEGIN IMMEDIATE")
             if db.execute("SELECT 1 FROM import_receipts WHERE row_key=?", (row_key,)).fetchone():
+                return
+            # Monthly movements need a second, serialized review guard. Core's
+            # precheck uses a separate connection and can race an HTTP fact edit.
+            # Inventory rows deliberately do not use this stricter rule.
+            if db.execute("SELECT 1 FROM import_rejections WHERE row_key=?", (row_key,)).fetchone():
+                return
+            if row_key in self.movement_keys and any(
+                decode(raw).suspected_serial == drive.serial
+                for (raw,) in db.execute("SELECT facts FROM drives")
+            ):
+                db.execute(
+                    "INSERT INTO import_rejections VALUES(?,?)", (row_key, "ambiguous serial")
+                )
+                self.checkpoint("before-row-commit")
                 return
             row = (
                 db.execute("SELECT facts FROM drives WHERE serial=?", (drive.serial,)).fetchone()

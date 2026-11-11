@@ -8,7 +8,6 @@ and raw-data diagnostics are never exposed as mutation endpoints.
 
 import hashlib
 import json
-import re
 from collections import defaultdict
 from dataclasses import asdict, replace
 from io import BytesIO
@@ -21,6 +20,7 @@ from flask import Flask, make_response, render_template_string, request
 from openpyxl import load_workbook
 from t6.domain import Project
 from t6.drives import DriveStore, Ref
+from t6.drives import importer as core_importer
 from t6.drives.importer import import_log_sheet_workbook, import_per_project_workbook
 from t6.lookup import Index, Lookup
 
@@ -54,6 +54,59 @@ class CachedProjectReader:
             if p["active_page_id"]
         )
         return Lookup(Index(projects=projects))
+
+
+def structural_rows(snapshot: Path, workbook: str, kind: str) -> set[str]:
+    """Classify only control rows consumed by the selected pinned core reader.
+
+    Core has no public structural-row API. Keep this compatibility seam aligned
+    with its two reader state machines, reusing its column/date grammar. Read
+    cached values just as core does, not the formula-bearing evidence journal.
+    """
+    found: set[str] = set()
+    source = load_workbook(snapshot, read_only=True, data_only=True)
+    try:
+        for sheet in source.worksheets:
+            columns = None
+            for number, values in enumerate(sheet.iter_rows(values_only=True), 1):
+                structural = False
+                first = str(values[0] or "").strip() if values else ""
+                if kind == "inventory":
+                    structural = bool(core_importer._PROJECT_NAME.search(first)) or (
+                        first.upper() == core_importer._LABEL
+                    )
+                else:
+                    texts = [str(value).strip() for value in values if value is not None]
+                    dated = next(
+                        (m for m in map(core_importer._TAB_DATE.fullmatch, texts) if m), None
+                    )
+                    if dated and columns is None:
+                        try:
+                            core_importer._date(dated.group(1))
+                            structural = True
+                        except ValueError:
+                            pass  # Unreadable date evidence must remain an exception.
+                    elif core_importer._LABEL in (text.upper() for text in texts):
+                        columns = core_importer._columns(values)
+                        structural = True
+                    elif columns is not None and "IN/OUT" not in columns:
+                        cells = core_importer._cells(columns, values)
+
+                        filled = {
+                            column
+                            for column, value in cells.items()
+                            if value is not None and str(value).strip()
+                        }
+                        structural = (
+                            core_importer._LABEL in filled
+                            and "SERIAL NUMBER" not in filled
+                            and "QUANTITY" in filled
+                        )
+                if structural:
+                    found.add(row_key(workbook, sheet.title, number))
+    finally:
+        source.close()
+    return found
 
 
 class InventoryImports:
@@ -176,11 +229,19 @@ class InventoryImports:
                 snapshot.touch(mode=0o600)
                 snapshot.write_bytes(raw)
                 keys = {row_key(str(snapshot), entry[3], entry[4]): entry[0] for entry in entries}
+                # Pinned core has no public row-classification API. Use its own
+                # reader to scope the atomic guard to monthly movements only.
+                movement_keys = (
+                    {keys[row.import_key] for row in core_importer._read_log_sheet(snapshot)[1]}
+                    if kind == "log-sheet"
+                    else set()
+                )
                 protocol: DriveStore = SQLiteDriveStore(
                     self.database,
                     checkpoint=self.store.checkpoint,
                     receipt_keys=keys,
                     source_lineage=lineage,
+                    movement_keys=movement_keys,
                 )
                 importer = (
                     import_log_sheet_workbook
@@ -193,6 +254,7 @@ class InventoryImports:
                     lookup=CachedProjectReader(self.database).lookup(),
                     logged_by=Ref(text="Unknown imported actor"),
                 )
+                structure = structural_rows(snapshot, str(path), kind)
             reasons: dict[str, list[dict[str, Any]]] = defaultdict(list)
             for review in result.review:
                 reasons[row_key(str(path), review.sheet, review.row)].append(
@@ -201,21 +263,20 @@ class InventoryImports:
             with self.store.connect() as db:
                 db.execute("BEGIN IMMEDIATE")
                 for entry in entries:
-                    key, _, _, _, _, evidence, _, _ = entry
+                    key = entry[0]
                     receipt = db.execute(
                         "SELECT 1 FROM import_receipts WHERE row_key=?", (key,)
                     ).fetchone()
-                    cells = json.loads(evidence)
-                    first = str(cells[0] or "").strip() if cells else ""
-                    # Mirror the pinned core per-project reader's grammar/search;
-                    # it exposes no public structural-row recognizer.
-                    structural = first.upper() == "HARD DRIVE LABEL" or bool(
-                        re.search(r"PROJECT NAME\s*:\s*(.*)", first, re.IGNORECASE | re.DOTALL)
-                    )
+                    structural = key in structure
                     why = reasons.get(key, [])
                     observation = db.execute(
                         "SELECT reason FROM import_observations WHERE row_key=?", (key,)
                     ).fetchone()
+                    rejection = db.execute(
+                        "SELECT reason FROM import_rejections WHERE row_key=?", (key,)
+                    ).fetchone()
+                    if rejection:
+                        why.append({"reason": rejection[0], "detail": "Source retained"})
                     # Evidence is append-only across reruns: a serial correction
                     # cannot erase an earlier conflicting observation.
                     previous = db.execute(

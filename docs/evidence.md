@@ -6,14 +6,14 @@ The principal seam is observable HTTP/UI against the real Flask app, temporary S
 
 - `tests/test_inventory.py` covers creation, stable permanent ID/reopen, full facts/review, unknown/T6/Studio ownership, text/review searches, accepted-only exact lookup, visibly uncertain candidates, invalid values, editing, serial normalization/correction/removal, explicit promotion and collisions. Sole-identity removal is rejected. Stale edits and stale promotion return 409 without replacing newer facts.
 - Concurrent HTTP requests use separate clients and SQLite connections. Existing Drives attempting to swap occupied serials both fail with their complete detail facts unchanged, including after reopen. Existing Drives racing for one free serial produce one winner and one unchanged loser; concurrent creation likewise yields one accepted-serial owner. These tests cover the evidence currently stored, not future Assignment/custody/shipment histories.
-- Browser writes are checked for CSRF tokens, Host/Origin rejection, non-mutating GETs and escaped HTML. A validation-error regression verifies submitted synthetic text is absent from the error response. Rejected validation forms clear values and must be re-entered.
+- Browser writes are checked for CSRF tokens, Host/Origin rejection, non-mutating GETs and escaped HTML. Validation-error regressions verify submitted synthetic text is absent from the error response and a rejected edit offers only a reload link, not a blank replacement form. Reloading retrieves current stored facts and revision before retrying.
 - `tests/test_browser.py` starts a real loopback HTTP server and Chromium using Playwright. It exercises create/detail/inventory/edit navigation, uncertain search, accepted-only lookup, unknown ownership, stale-form rejection and explicit promotion. The checkpoint run passed with Chromium `143.0.7499.4` and no browser console/page errors. Synthetic screenshots (`uncertain-inventory.png`, `edited-detail.png`), `browser-trace.zip` and `browser-result.json` are retained outside git when `BROWSER_ARTIFACTS` is set; see README for reproduction. Traces contain synthetic form/session data and are not public deployment evidence.
 
 The following commands were rerun successfully with Python 3.12 at this checkpoint:
 
 ```sh
 BROWSER_ARTIFACTS=<private-scratch-directory> .venv/bin/python -m unittest discover -s tests -v
-# 15 tests passed, including the real Chromium scenario
+# 16 tests passed, including the real Chromium scenario
 .venv/bin/python -m compileall -q app.py tests
 .venv/bin/mypy
 # Success: no issues found in 3 source files (check_untyped_defs, not strict typing)
@@ -33,7 +33,7 @@ Initial red/green commands used Python 3.12, an archive of the exact core merge 
 - The same command failed create/reopen at the missing form token, then passed after create and SQLite reopening were implemented.
 - The same command failed full-facts/normalization behavior, then passed after the inventory implementation.
 - Later security, collision, editing and concurrency scenarios were added against the implementation and passed on first execution. They are regression evidence, not separate red-first cycles. The requested strict one-failing-test-per-slice discipline was not fully met.
-- A later red-first validation-error test exposed submitted synthetic text echoed in a 400 response; after clearing form values on errors it passed.
+- A later red-first validation-error test exposed submitted synthetic text echoed in a 400 response; after clearing form values on errors it passed. Independent review then identified that the blank retry form could accidentally clear existing facts or carry a refreshed revision after invalid stale input. A new regression failed on the active cleared error form, then passed after validation errors were changed to offer only a fresh GET via a reload link.
 
 ## Acceptance boundaries
 

@@ -274,8 +274,8 @@ def create_app(database: str) -> Flask:
             except StaleEdit:
                 return 'Drive changed. <a href="">Reload the form</a> before editing.', 409
             except ValueError as exc:
-                values = {}
                 # Core exceptions can contain user data; return a fixed message.
+                # Offer only a fresh GET, never a cleared full-replacement edit form.
                 error = (
                     str(exc)
                     if str(exc)
@@ -288,6 +288,11 @@ def create_app(database: str) -> Flask:
                     )
                     else "Enter meaningful identifying detail and valid serial values."
                 )
+                return render_template_string(
+                    '<!doctype html><title>Invalid facts</title><p role="alert">{{ error }}</p>'
+                    '<a href="">Reload the form</a> to retry with current facts.',
+                    error=error,
+                ), 400
         return render_template_string(
             FORM,
             title="Edit Drive" if drive else "New Drive",

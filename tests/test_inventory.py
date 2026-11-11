@@ -468,6 +468,41 @@ class InventoryTest(unittest.TestCase):
             self.assertEqual(client.post(location + "/promote", data=stale).status_code, 409)
             self.assertEqual(client.get(location).data, before)
 
+    def test_invalid_edit_requires_reload_without_offering_a_blank_replacement_form(self):
+        with tempfile.TemporaryDirectory() as directory:
+            client = create_app(str(Path(directory) / "db")).test_client()
+            location = client.post(
+                "/new",
+                data={
+                    "csrf": token(client),
+                    "description": "synthetic retained identity",
+                    "serial": "synthetic retained serial",
+                    "brand": "synthetic retained brand",
+                    "ownership": "t6",
+                },
+            ).headers["Location"]
+            before = client.get(location).data
+            response = client.post(
+                location + "/edit",
+                data=edit_data(
+                    client,
+                    location,
+                    description="synthetic rejected private marker",
+                    capacity_tb="invalid",
+                ),
+            )
+            page = response.get_data(as_text=True)
+            self.assertEqual(response.status_code, 400)
+            self.assertIn("Capacity must be a finite positive number.", page)
+            self.assertIn("Reload the form", page)
+            self.assertNotIn("<form", page)
+            self.assertNotIn('name="revision"', page)
+            self.assertNotIn("synthetic rejected private marker", page)
+            self.assertEqual(client.get(location).data, before)
+            reloaded = client.get(location + "/edit").get_data(as_text=True)
+            self.assertIn("synthetic retained brand", reloaded)
+            self.assertIn("SYNTHETIC RETAINED SERIAL", reloaded)
+
     def test_validation_error_does_not_echo_submitted_private_text(self):
         with tempfile.TemporaryDirectory() as directory:
             client = create_app(str(Path(directory) / "db")).test_client()

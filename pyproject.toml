@@ -19,11 +19,11 @@ line-length = 100
 [tool.mypy]
 python_version = "3.12"
 check_untyped_defs = true
-files = ["app.py", "assignments.py", "custody.py", "shipments.py", "import_store.py", "imports.py", "imported_shipments.py", "runtime.py", "backups.py", "tools", "tests"]
+files = ["app.py", "assignments.py", "custody.py", "shipments.py", "import_store.py", "imports.py", "imported_shipments.py", "runtime.py", "backups.py", "rehearsal.py", "tools", "tests"]
 
 [build-system]
 requires = ["setuptools==80.9.0"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
-py-modules = ["app", "assignments", "custody", "shipments", "import_store", "imports", "imported_shipments", "runtime", "backups"]
+py-modules = ["app", "assignments", "custody", "shipments", "import_store", "imports", "imported_shipments", "runtime", "backups", "rehearsal"]

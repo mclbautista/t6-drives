@@ -1,10 +1,11 @@
 # Ticket #8: synthetic packaging and operator procedure
 
-**Not operational approval. G1–G5 remain unresolved.** No selected real host,
-allowed office sources, accepted actor convention/equal-write policy, approved
-recovery destination/key custodian/operator, or production activation authority
-is implied. No accounts or authenticated application roles exist. Current actor
-policy is unknown; imported unknown attribution stays unknown. This document is
+**Not operational approval. Production G1, G4 and G5 remain open.**
+The accepted G2/G3 self-declared actor/equal-write limits and isolated Mac
+rehearsal boundary are documented in [ticket #10 preparation](rehearsal.md);
+they do not select a production host, configure recovery or activate production.
+No accounts or authenticated application roles exist. Both launchers require
+self-declared actors by default; imported unknown attribution stays unknown. This document is
 for newly generated synthetic data only. Never use the netops public host,
 public proxy, general tailnet or a shared queue/registry database by inference.
 
@@ -110,8 +111,8 @@ non-office and general-tailnet access independently. Private DNS, tailnet
 membership or a VPS alone does not prove authorization. Docker publication can
 bypass host firewall assumptions. No firewall/routing changes are made here.
 
-G2/G3: approve attribution and equal operational-write limits or replace the
-proposal. Host-only import/cache refresh/restore/deployment are shell operations,
+G2/G3: accepted self-declared attribution and equal operational-write limits
+are recorded in [rehearsal preparation](rehearsal.md). Host-only import/cache refresh/restore/deployment are shell operations,
 not unprotected browser endpoints. An allowed office user is not an authenticated
 identity; append-only app interfaces do not prevent host-admin tampering.
 

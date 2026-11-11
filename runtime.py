@@ -15,6 +15,9 @@ def application() -> Flask:
     database = os.environ.get("DRIVES_DB", "/data/drives.sqlite")
     if not Path(database).is_absolute() or Path(database).parent != Path("/data"):
         raise RuntimeError("Container database must be directly inside the dedicated /data volume.")
-    app = create_app(database)
+    app = create_app(
+        database,
+        custody_actor_policy=os.environ.get("DRIVES_ACTOR_POLICY", "self-declared-required"),
+    )
     app.secret_key = secret
     return app

@@ -17,7 +17,7 @@ from flask import Flask, abort, redirect, render_template_string, request
 from t6.drives import CustodyEvent, CustodyKind, Party, PartyKind, Ref
 
 from assignments import Assignments
-from custody import reference
+from custody import declared_actor, reference
 
 
 class Shipments:
@@ -82,9 +82,7 @@ class Shipments:
         ids = list(dict.fromkeys(ids))
         if not ids:
             raise ValueError
-        actor = form.get("actor", "").strip() or None
-        if actor and actor_policy != "self-declared-synthetic":
-            raise ValueError
+        actor = declared_actor(form, actor_policy)
         party_id = form.get("party_page_id", "").strip() or None
         party_kind = form.get("party_kind", "").strip() or None
         if bool(party_id) != bool(party_kind):
@@ -172,7 +170,7 @@ class Shipments:
 
 FORM = """<!doctype html><title>Release shipment</title><h1>Release shipment</h1>
 <a href="/">Inventory</a> <a href="/shipments">Shipments</a>
-<p>G2 unresolved: synthetic use only. Actors are not authenticated; operational deployment remains gated.</p>
+<p>Actors are self-declared, not authenticated. No accounts or enforced roles; host and recovery gates still apply.</p>
 {{ cache|safe }}
 <form method="post"><input type="hidden" name="csrf" value="{{ csrf }}">
 <fieldset><legend>Select permanent Drive IDs for one handover</legend>
@@ -183,7 +181,7 @@ FORM = """<!doctype html><title>Release shipment</title><h1>Release shipment</h1
 <label>Existing party page ID <input name="party_page_id"></label>
 <label>Cached Project <select name="project_page_id"><option value="">Unresolved text instead</option>{% for p in projects %}{% if p.active_page_id %}<option value="{{ p.active_page_id }}">{{ p.name }} — {{ p.t6_id }}</option>{% endif %}{% endfor %}</select></label>
 <label>Project unresolved text <input name="project_text"></label>
-{% if actor_policy == 'self-declared-synthetic' %}<label>Self-declared actor (not authenticated) <input name="actor"></label>{% else %}<p>Recorded actor: Unknown actor (G2 unresolved).</p>{% endif %}
+{% if actor_policy in ['self-declared-required', 'self-declared-synthetic'] %}<label>Self-declared actor (not authenticated) <input name="actor" maxlength="120" {% if actor_policy == 'self-declared-required' %}required{% endif %}></label>{% else %}<p>Recorded actor: Unknown actor (synthetic compatibility policy).</p>{% endif %}
 <label>Reason <input name="reason"></label><button>Release selected Drives</button></form>"""
 
 MANIFEST = """<!doctype html><html><head><meta charset="utf-8"><title>Shipment {{ s.id }}</title>
@@ -197,7 +195,7 @@ MANIFEST = """<!doctype html><html><head><meta charset="utf-8"><title>Shipment {
 <p>Project: {{ s.project_display }}</p><p>Reason: {{ s.reason or 'Unknown reason' }}</p>
 <table><thead><tr><th>Permanent Drive ID</th><th>Accepted serial</th><th>Suspected serial (uncertain)</th><th>Label</th><th>Description</th><th>Capacity (TB)</th><th>Review state / note</th></tr></thead><tbody>
 {% for line in s.lines %}<tr data-drive-id="{{ line.drive_id }}"><td>{{ line.drive_id }}</td><td>{{ line.serial or 'Unknown accepted serial' }}</td><td>{{ line.suspected_serial or 'Unknown suspected serial' }}</td><td>{{ line.label or 'Unknown label' }}</td><td>{{ line.description or 'Unknown description' }}</td><td>{{ line.capacity_tb if line.capacity_tb is not none else 'Unknown capacity' }}</td><td>{{ 'Needs review' if line.needs_review else 'Not flagged' }}; {{ line.review_note or 'Unknown review note' }}</td></tr>{% endfor %}</tbody></table>
-<p>This saved snapshot is not current custody or open Project use. Corrections append custody evidence; they do not rewrite this manifest. G2 unresolved: no authenticated attribution. App/storage immutability is not tamper-proof against a host administrator.</p></main></body></html>"""
+<p>This saved snapshot is not current custody or open Project use. Corrections append custody evidence; they do not rewrite this manifest. No authenticated attribution or enforced roles. App/storage immutability is not tamper-proof against a host administrator.</p></main></body></html>"""
 
 
 def register_shipments(
@@ -212,7 +210,7 @@ def register_shipments(
                 return "Unknown Drive. No Drives released. Reload the form.", 400
             except (ValueError, TypeError):
                 return (
-                    "Invalid shipment: select Drives and valid dates/references. No Drives released.",
+                    "Invalid shipment: supply the required self-declared actor (1–120 printable characters), select Drives and valid dates/references. No Drives released.",
                     400,
                 )
             return redirect("/shipments/" + key, code=303)

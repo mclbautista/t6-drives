@@ -47,17 +47,26 @@ class SQLiteDriveStore:
         *,
         checkpoint: Callable[[str], None] | None = None,
         receipt_keys: dict[str, str] | None = None,
+        source_lineage: str | None = None,
+        movement_keys: set[str] | None = None,
     ):
+        self.movement_keys = movement_keys or set()
+        self.source_lineage = source_lineage
         self.receipt_keys = receipt_keys
         self.inventory = Inventory(database)
         self.assignments = Assignments(database)
         self.custody = Custody(self.connect)
         self.checkpoint = checkpoint or (lambda stage: None)
+        from imported_shipments import initialize
+
+        initialize(self.connect, self.assignments)
         with self.connect() as db:
             db.execute("""CREATE TABLE IF NOT EXISTS import_receipts (
                 row_key TEXT PRIMARY KEY, drive_id TEXT NOT NULL REFERENCES drives(id))""")
             db.execute("""CREATE TABLE IF NOT EXISTS import_observations (
                 row_key TEXT PRIMARY KEY REFERENCES import_receipts(row_key), reason TEXT NOT NULL)""")
+            db.execute("""CREATE TABLE IF NOT EXISTS import_rejections (
+                row_key TEXT PRIMARY KEY, reason TEXT NOT NULL)""")
 
     def connect(self) -> sqlite3.Connection:
         db = self.inventory.connect()
@@ -146,8 +155,8 @@ class SQLiteDriveStore:
         return row[0] if row else None
 
     @staticmethod
-    def _event(db: sqlite3.Connection, drive_id: str, event: CustodyEvent) -> None:
-        db.execute(
+    def _event(db: sqlite3.Connection, drive_id: str, event: CustodyEvent) -> int:
+        cursor = db.execute(
             "INSERT INTO custody_events(drive_id,event,recipient,actor_mode) VALUES(?,?,?,?)",
             (
                 drive_id,
@@ -157,6 +166,9 @@ class SQLiteDriveStore:
             ),
         )
 
+        assert cursor.lastrowid is not None
+        return cursor.lastrowid
+
     def import_row(
         self, row_key: str, drive: Drive, assignment: Assignment, events: Sequence[CustodyEvent]
     ) -> None:
@@ -164,6 +176,20 @@ class SQLiteDriveStore:
         with self.connect() as db:
             db.execute("BEGIN IMMEDIATE")
             if db.execute("SELECT 1 FROM import_receipts WHERE row_key=?", (row_key,)).fetchone():
+                return
+            # Monthly movements need a second, serialized review guard. Core's
+            # precheck uses a separate connection and can race an HTTP fact edit.
+            # Inventory rows deliberately do not use this stricter rule.
+            if db.execute("SELECT 1 FROM import_rejections WHERE row_key=?", (row_key,)).fetchone():
+                return
+            if row_key in self.movement_keys and any(
+                decode(raw).suspected_serial == drive.serial
+                for (raw,) in db.execute("SELECT facts FROM drives")
+            ):
+                db.execute(
+                    "INSERT INTO import_rejections VALUES(?,?)", (row_key, "ambiguous serial")
+                )
+                self.checkpoint("before-row-commit")
                 return
             row = (
                 db.execute("SELECT facts FROM drives WHERE serial=?", (drive.serial,)).fetchone()
@@ -205,8 +231,29 @@ class SQLiteDriveStore:
                     "INSERT INTO assignments(drive_id,value) VALUES(?,?)",
                     (held.id, Assignments.encode(assignment)),
                 )
-            for event in events:
-                self._event(db, held.id, event)
+            for position, event in enumerate(events):
+                if self.source_lineage and event.kind == CustodyKind.RELEASED:
+                    from imported_shipments import shipment_key
+
+                    event = replace(
+                        event,
+                        shipment_id=shipment_key(
+                            self.source_lineage, event.shipment_id or f"{row_key}:{position}"
+                        ),
+                    )
+                event_id = self._event(db, held.id, event)
+                if self.source_lineage:
+                    db.execute(
+                        "INSERT INTO imported_event_sources VALUES(?,?,?,?,?,?)",
+                        (
+                            event_id,
+                            self.source_lineage,
+                            row_key,
+                            encode(drive),
+                            Assignments.encode(assignment),
+                            event.shipment_id,
+                        ),
+                    )
                 self.checkpoint("event-written")
             db.execute("INSERT INTO import_receipts VALUES(?,?)", (row_key, held.id))
             if additional_facts:

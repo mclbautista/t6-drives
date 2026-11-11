@@ -1,0 +1,23 @@
+[project]
+name = "t6-drives"
+version = "0.1.0"
+requires-python = ">=3.12,<3.13"
+dependencies = ["flask==3.1.3", "t6 @ git+https://github.com/mclbautista/t6-core.git@f4b7618c2eb14bb5f85ea3c1fa597843448bc3af"]
+
+[dependency-groups]
+dev = ["ruff==0.17.3", "mypy==1.19.1", "playwright==1.57.0", "build==1.3.0"]
+
+[tool.ruff]
+line-length = 100
+
+[tool.mypy]
+python_version = "3.12"
+check_untyped_defs = true
+files = ["app.py", "tests"]
+
+[build-system]
+requires = ["setuptools==80.9.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+py-modules = ["app"]

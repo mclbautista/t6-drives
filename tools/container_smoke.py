@@ -39,6 +39,7 @@ def smoke(image: str) -> None:
     )
     compose = ("docker", "compose", "-p", project)
     volume = project + "_drives_data"
+    release = json.loads(command("docker", "image", "inspect", image))[0]["Id"]
 
     def dc(*args):
         return command(*compose, *args, env=env)
@@ -176,10 +177,21 @@ with sqlite3.connect('/data/drives.sqlite') as db:
             assert offline(snapshot) == digest
         print("PASS HTTP + complete SQLite state unchanged across restart and replacement")
         dc("stop", "app")
-        offline("""
-import sqlite3
-with sqlite3.connect('/data/drives.sqlite') as source, sqlite3.connect('/data/recovery.sqlite') as recovery:
-    source.backup(recovery)
+        offline(
+            """
+import json, sqlite3, time
+from pathlib import Path
+from cryptography.fernet import Fernet
+from backups import BackupConfig, backup, restore
+root = Path('/data/synthetic-backups')
+root.mkdir(mode=0o700)
+key = root / 'key'
+key.write_bytes(Fernet.generate_key())
+key.chmod(0o600)
+config = BackupConfig(Path('/data/drives.sqlite'), root, key, RELEASE)
+archive = backup(config, 'nightly')
+backup(config, 'pre-deploy')
+assert b'SQLite format' not in archive.read_bytes()
 with sqlite3.connect('/data/drives.sqlite') as db:
     db.execute('PRAGMA user_version=999')
     db.execute('DROP TABLE drives')
@@ -190,17 +202,20 @@ except RuntimeError:
     pass
 else:
     raise AssertionError('future schema accepted')
-# App stopped: restore consistent recovery point, not a blind file copy with WAL.
-with sqlite3.connect('/data/recovery.sqlite') as recovery, sqlite3.connect('/data/drives.sqlite') as destination:
+# Fresh target refuses overwrite; validate the complete logical state before promotion.
+started = time.monotonic()
+fresh = restore(config, archive, Path('/data/fresh-recovery'))
+with sqlite3.connect(fresh) as recovery, sqlite3.connect('/data/drives.sqlite') as destination:
     recovery.backup(destination)
-""")
+assert time.monotonic() - started < 4 * 3600
+print('PASS synthetic encrypted fresh-target restore within 4h; off-host NOT verified')
+""".replace("RELEASE", repr(release))
+        )
         dc("up", "-d")
         url = target()
         assert offline(snapshot) == digest
         assert {p: browser.open(url + p).read() for p in pages} == before
-        print(
-            "PASS incompatible schema refused + disposable SQLite backup-based rollback + HTTP recovery"
-        )
+        print("PASS incompatible schema refused + encrypted fresh-target rollback + HTTP recovery")
         # No administrative web route, no payload health, no cross-origin mutation.
         for path in ("/import", "/refresh-projects", "/restore", "/deploy"):
             try:

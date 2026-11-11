@@ -98,8 +98,9 @@ For a disposable recovery rehearsal (automated in the smoke):
 
 This same-volume recovery point tests schema rollback only. It is **not** an
 encrypted off-host backup, scheduled recovery service, host-loss recovery proof,
-RPO/RTO result or G4 acceptance. Ticket #9 owns that service; no operational
-restore is authorized here.
+RPO/RTO result or G4 acceptance. Ticket #9 provides the [encrypted recovery candidate and operator runbook](recovery.md);
+its off-host destination, installed scheduling and operational restore remain
+unverified and gated. No operational restore is authorized here.
 
 ## Boundary and privacy checks before any real deployment
 

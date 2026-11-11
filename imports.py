@@ -154,6 +154,9 @@ class InventoryImports:
         return row[0] if row else None
 
     def run(self, lineage: str, workbook: str, *, kind: str = "inventory") -> None:
+        from backups import pre_import
+
+        pre_import(self.database)
         if kind not in ("inventory", "log-sheet"):
             raise ValueError("Unknown import kind")
         path = Path(workbook)

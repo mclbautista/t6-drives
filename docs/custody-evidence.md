@@ -16,13 +16,13 @@ Scope: https://github.com/mclbautista/t6-drives/issues/4 under parent #1. Built 
 Using the existing integration Python 3.12 virtual environment without changing its packages:
 
 ```sh
-PYTHONPATH=. /Users/cyrilbautista/Projects/t6-drives/.venv/bin/python -m unittest discover -s tests -v
+PYTHONPATH=. .venv/bin/python -m unittest discover -s tests -v
 # 21 tests passed, including both real Chromium scenarios
-/Users/cyrilbautista/Projects/t6-drives/.venv/bin/mypy
+.venv/bin/mypy
 # Success: no issues found in 6 source files
-/Users/cyrilbautista/Projects/t6-drives/.venv/bin/ruff check .
-/Users/cyrilbautista/Projects/t6-drives/.venv/bin/ruff format --check .
-/Users/cyrilbautista/Projects/t6-drives/.venv/bin/python -m compileall -q app.py custody.py tests
+.venv/bin/ruff check .
+.venv/bin/ruff format --check .
+.venv/bin/python -m compileall -q app.py custody.py tests
 uv build
 # sdist and wheel built; custody.py included
 ```

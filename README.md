@@ -1,4 +1,4 @@
-# Synthetic Drive inventory, Assignments and custody (tickets #2–4)
+# Synthetic Drive inventory, Assignments, custody and shipments (tickets #2–5)
 
 A local, server-rendered inventory tracer bullet for **synthetic data only**. Python 3.12 and uv are required. From this directory:
 
@@ -16,10 +16,10 @@ Install the locked development tools and Chromium before running the full suite 
 uv pip install --python .venv/bin/python -r requirements-dev.lock
 .venv/bin/python -m playwright install chromium
 .venv/bin/python -m unittest discover -s tests -v
-.venv/bin/python -m compileall -q app.py assignments.py custody.py tests
+.venv/bin/python -m compileall -q app.py assignments.py custody.py shipments.py tests
 .venv/bin/mypy
-.venv/bin/ruff check app.py assignments.py custody.py tests
-.venv/bin/ruff format --check app.py assignments.py custody.py tests
+.venv/bin/ruff check app.py assignments.py custody.py shipments.py tests
+.venv/bin/ruff format --check app.py assignments.py custody.py shipments.py tests
 .venv/bin/python -m build
 ```
 
@@ -47,4 +47,8 @@ Drive details retain both Assignment forms/history and the Record custody link. 
 
 Project-cache refresh failures do not block custody. Adding/ending Assignments does not mutate custody, and receipt/release/return does not close Assignments. Search, exact serial, review, Project, unresolved-text and custody-status filters combine with AND at the Drive level; the two Project-use filters may be satisfied by separate open Assignments. Fact edits retain both histories and reject stale/missing revisions. Unknown ownership stays unknown.
 
-Shipment history, imports, general migrations/rollback, backup/restore and deployment are not implemented. Only fresh initialization, additive Assignment/cache/custody tables and revision/ownership columns for earlier synthetic stores are present. G1–G5 (host/access, attribution, write access, recovery, production cutover) remain unresolved; no operational use, real-data rehearsal, production import, workbook freeze or cutover is authorized by this slice. See [evidence](docs/evidence.md).
+## Atomic shipments and historical manifests
+
+Inventory links to Release shipment and Shipments. Select permanent Drive IDs for one atomic handover: duplicate selections release once, and empty/unknown batches or persistence failures release none. Details and browser printing read a saved display snapshot, not current physical facts. Accepted and suspected serials remain separate; missing facts are marked unknown. Later fact edits, Project refreshes and custody corrections do not rewrite the original. Corrections append custody evidence. Release/return does not end open Assignments. Cached Projects or unresolved text allow use during upstream outage, without live Contact/Studio access. See [shipment evidence](docs/shipment-evidence.md).
+
+Imports, general migrations/rollback, backup/restore and deployment are not implemented. Only fresh initialization, additive Assignment/cache/custody/shipment tables and revision/ownership columns for earlier synthetic stores are present. G1–G5 (host/access, attribution, write access, recovery, production cutover) remain unresolved; no operational use, real-data rehearsal, production import, workbook freeze or cutover is authorized by this slice. See [evidence](docs/evidence.md).

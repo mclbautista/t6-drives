@@ -14,6 +14,8 @@ from flask import Flask, abort, redirect, render_template_string, request, sessi
 from t6.drives import Drive, FormFactor, normalize_serial
 from werkzeug.exceptions import HTTPException
 
+from custody import HISTORY, Custody, register_custody
+
 FIELDS = (
     "serial",
     "suspected_serial",
@@ -191,13 +193,14 @@ FORM = """<!doctype html><title>{{ title }}</title><h1>{{ title }}</h1>
 <p><label><input type="checkbox" name="needs_review" {% if values.get('needs_review') %}checked{% endif %}> Needs review</label></p><button>Save</button></form>"""
 
 
-def create_app(database: str) -> Flask:
+def create_app(database: str, *, custody_actor_policy: str = "unknown") -> Flask:
     app = Flask(__name__)
     app.secret_key = secrets.token_bytes(32)
     app.config.update(
         SESSION_COOKIE_HTTPONLY=True, SESSION_COOKIE_SAMESITE="Strict", MAX_CONTENT_LENGTH=65536
     )
     inventory = Inventory(database)
+    custody = Custody(inventory.connect)
 
     @app.errorhandler(Exception)
     def safe_error(error):
@@ -225,11 +228,14 @@ def create_app(database: str) -> Flask:
             session["csrf"] = secrets.token_hex(32)
         return session["csrf"]
 
+    register_custody(app, custody, csrf, custody_actor_policy)
+
     @app.get("/")
     def index():
         q = request.args.get("q", "").strip().casefold()
         serial = request.args.get("serial", "").strip()
         review = request.args.get("review", "")
+        status = request.args.get("status", "")
         drives = [inventory.exact(serial)] if serial else inventory.all()
         drives = [
             d
@@ -243,10 +249,13 @@ def create_app(database: str) -> Flask:
                 )
             )
             and (review not in ("yes", "no") or d.needs_review == (review == "yes"))
+            and (not status or custody.status(d.id) == status)
         ]
         return render_template_string(
-            """<!doctype html><title>Inventory</title><h1>Inventory</h1><a href="/new">New Drive</a><form><label>Search <input name="q" value="{{ q }}"></label><label>Exact accepted serial <input name="serial"></label><label>Review <select name="review"><option value="">All</option><option value="yes">Needs review</option><option value="no">Not flagged</option></select></label><button>Find</button></form><ul>{% for d in drives %}<li><a href="/drive/{{ d.id }}">{{ d.id }}</a> {{ d.label or '' }} {{ d.description or '' }} {% if d.serial %}Accepted: {{ d.serial }}{% endif %} {% if d.suspected_serial %}Suspected (uncertain): {{ d.suspected_serial }}{% endif %} {% if d.needs_review %}Needs review{% endif %}</li>{% endfor %}</ul>""",
+            """<!doctype html><title>Inventory</title><h1>Inventory</h1><a href="/new">New Drive</a><form><label>Search <input name="q" value="{{ q }}"></label><label>Exact accepted serial <input name="serial"></label><label>Review <select name="review"><option value="">All</option><option value="yes">Needs review</option><option value="no">Not flagged</option></select></label><label>Status <select name="status" aria-label="Status"><option value="">All</option>{% for choice in ["unknown", "in custody", "released", "retired"] %}<option {% if status == choice %}selected{% endif %}>{{ choice }}</option>{% endfor %}</select></label><button>Find</button></form><ul>{% for d in drives %}<li><a href="/drive/{{ d.id }}">{{ d.id }}</a> {{ d.label or '' }} {{ d.description or '' }} Custody status: {{ custody.status(d.id) }} {% if d.serial %}Accepted: {{ d.serial }}{% endif %} {% if d.suspected_serial %}Suspected (uncertain): {{ d.suspected_serial }}{% endif %} {% if d.needs_review %}Needs review{% endif %}</li>{% endfor %}</ul>""",
             drives=drives,
+            custody=custody,
+            status=status,
             q=q,
         )
 
@@ -311,9 +320,14 @@ def create_app(database: str) -> Flask:
             abort(404)
         drive, revision, ownership_known = record
         values = json.loads(encode(drive))
+        history_html = render_template_string(
+            HISTORY, history=custody.history(drive_id), drive_id=drive_id
+        )
         return render_template_string(
-            """<!doctype html><title>Drive</title><h1>Drive {{ d.id }}</h1><a href="/">Inventory</a> <a href="/drive/{{ d.id }}/edit">Edit</a><dl>{% for name in fields %}{% if values.get(name) is not none %}<dt>{{ labels.get(name, name|capitalize) }}</dt><dd>{{ values[name] }}</dd>{% endif %}{% endfor %}<dt>Ownership</dt><dd>{{ (d.owner_studio_id or "T6") if ownership_known else "Unknown ownership" }}</dd><dt>Needs review</dt><dd>{{ 'Yes' if d.needs_review else 'No' }}</dd></dl>{% if d.suspected_serial %}<form method="post" action="/drive/{{ d.id }}/promote"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="revision" value="{{ revision }}"><button>Promote suspected serial to accepted</button></form>{% endif %}""",
+            """<!doctype html><title>Drive</title><h1>Drive {{ d.id }}</h1><a href="/">Inventory</a> <a href="/drive/{{ d.id }}/edit">Edit</a> <a href="/drive/{{ d.id }}/custody">Record custody</a><p>Custody status: {{ status }}</p><p>G2 unresolved: synthetic use only; actors are not authenticated. Operational deployment remains gated.</p>{{ history_html|safe }}<dl>{% for name in fields %}{% if values.get(name) is not none %}<dt>{{ labels.get(name, name|capitalize) }}</dt><dd>{{ values[name] }}</dd>{% endif %}{% endfor %}<dt>Ownership</dt><dd>{{ (d.owner_studio_id or "T6") if ownership_known else "Unknown ownership" }}</dd><dt>Needs review</dt><dd>{{ 'Yes' if d.needs_review else 'No' }}</dd></dl>{% if d.suspected_serial %}<form method="post" action="/drive/{{ d.id }}/promote"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="revision" value="{{ revision }}"><button>Promote suspected serial to accepted</button></form>{% endif %}""",
             d=drive,
+            status=custody.status(drive_id),
+            history_html=history_html,
             ownership_known=ownership_known,
             values=values,
             fields=FIELDS,

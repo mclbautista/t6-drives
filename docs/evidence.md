@@ -1,6 +1,30 @@
 # Synthetic verification and remaining evidence
 
-## Current checkpoint
+## Ticket #3 checkpoint: Project cache and Assignments
+
+The completed synthetic candidate adds `tests/test_assignments.py` at the approved HTTP/UI + real SQLite seam; only the external Project reader is substituted. The bootstrap scenario uses a real JSON export through `refresh-projects --export`, then exercises successful changed-active/retained-legacy refresh, permanent-ID filtering, sanitized outage/incomplete/missing-binding/rollback failures, unresolved text that equals a code without guessed resolution, and restart persistence. Assignment scenarios cover meaningful no-serial/review-flagged Drives, unknown role/start, repeated labels, concurrent open use, explicit end, invalid date atomicity, repeat-end rejection, unknown Drives, escaped remarks, CSRF/Origin protection and non-mutating GETs. The real Chromium scenario now also navigates cached/unresolved Assignment creation, explicit ending, retained history and open-use inventory filters independently of custody, with no browser console/page errors.
+
+Final local commands passed:
+
+```sh
+.venv/bin/python -m unittest discover -s tests -v
+# 18 tests passed, including the extended real Chromium scenario
+.venv/bin/python -m compileall -q app.py assignments.py tests
+.venv/bin/mypy
+# Success: no issues found in 5 source files (check_untyped_defs, not strict typing)
+.venv/bin/ruff check app.py assignments.py tests
+.venv/bin/ruff format --check app.py assignments.py tests
+.venv/bin/python -m build
+# sdist and wheel built; wheel explicitly checked to contain assignments.py
+```
+
+The README's real `python -m flask --app 'app:create_app(...)' refresh-projects --export ...` command was also executed against a disposable synthetic database/export, returned `Complete Project cache saved.`, and a fresh app readback returned HTTP 200 with the cached Project. Refresh is not an operational browser route. CI/build/typecheck/lint scope includes the new module; remote CI is not claimed green.
+
+Prior Assignment red cycles were recorded during candidate development; the added export/browser coverage is regression evidence, not a new red-first implementation cycle. The initial extended browser run failed on an overly exact selector for a wrapping select label; correcting the test locator passed without changing application behavior.
+
+This supplies ticket #3's Assignment/cache coverage, not completion of every parent acceptance criterion. Custody during outage and custody/Assignment independence after custody mutations require T4 integration verification. Shipment snapshots, importer/receipts/exceptions, general migrations/rollback, backup/restore, deployment boundaries and G1–G5 remain outside this candidate. No integration, real-data use, production activation or issue-checkbox changes were performed. Independent review remains the integrating agent's responsibility.
+
+## Earlier ticket #2 checkpoint (historical evidence)
 
 The principal seam is observable HTTP/UI against the real Flask app, temporary SQLite and core pinned to `f4b7618c2eb14bb5f85ea3c1fa597843448bc3af`. No fake store, mocked core, real inputs or live operational services are used.
 

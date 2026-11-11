@@ -206,6 +206,8 @@ class CustodyTest(unittest.TestCase):
             before = client.get(location).data
             for fields in (
                 {"kind": "retired"},
+                {"kind": "retired", "reason": "   "},
+                {"kind": "received", "correction_of": "not-an-id"},
                 {"kind": "invented"},
                 {"kind": "received", "on": "private-invalid-date"},
                 {"kind": "received", "correction_of": "999"},

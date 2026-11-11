@@ -42,6 +42,28 @@ class Shipments:
                     SELECT RAISE(ABORT, 'Shipment snapshots are immutable'); END;
             """)
 
+        # Upgrade the original interactive-only membership constraint. Repeated
+        # imported events have distinct event IDs/positions, not distinct Drives.
+        # Interactive selection still deduplicates before creating any events.
+        with connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            unique_drive = any(
+                [r[2] for r in db.execute(f'PRAGMA index_info("{index[1]}")')]
+                == ["shipment_id", "drive_id"]
+                for index in db.execute("PRAGMA index_list(shipment_members)")
+                if index[2]
+            )
+            if unique_drive:
+                db.execute("""CREATE TABLE shipment_members_next (
+                    shipment_id TEXT NOT NULL REFERENCES shipments(id),
+                    position INTEGER NOT NULL,
+                    drive_id TEXT NOT NULL REFERENCES drives(id),
+                    event_id INTEGER NOT NULL UNIQUE REFERENCES custody_events(id),
+                    PRIMARY KEY(shipment_id, position))""")
+                db.execute("INSERT INTO shipment_members_next SELECT * FROM shipment_members")
+                db.execute("DROP TABLE shipment_members")
+                db.execute("ALTER TABLE shipment_members_next RENAME TO shipment_members")
+
     def all(self) -> list[dict[str, Any]]:
         with self.connect() as db:
             return [

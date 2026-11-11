@@ -104,6 +104,115 @@ class MovementTests(unittest.TestCase):
             self.assertIn('href="/exceptions"', client.get("/").text)
             self.assertIn("Cache-Control", page.headers)
 
+    def test_registered_source_cannot_be_reinterpreted_by_other_entrypoint(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "synthetic-log.xlsx"
+            database = str(Path(directory) / "synthetic.sqlite")
+            log_workbook(path)
+            imports = InventoryImports(database)
+            imports.run("synthetic-log", str(path), kind="log-sheet")
+            with self.assertRaises(ValueError):
+                imports.run("synthetic-log", str(path))
+
+    def test_upgrade_retains_operational_snapshot_and_accepts_repeated_imported_lines(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "synthetic-log.xlsx"
+            database = str(Path(directory) / "synthetic.sqlite")
+            log_workbook(path)
+            app = create_app(database)
+            imports = InventoryImports(database)
+            store = Shipments(imports.store.connect, imports.store.assignments)
+            with imports.store.connect() as db:
+                db.execute("DROP TABLE shipment_members")
+                db.execute(
+                    "CREATE TABLE shipment_members(shipment_id TEXT NOT NULL REFERENCES shipments(id), position INTEGER NOT NULL, drive_id TEXT NOT NULL REFERENCES drives(id), event_id INTEGER NOT NULL UNIQUE REFERENCES custody_events(id), PRIMARY KEY(shipment_id,position), UNIQUE(shipment_id,drive_id))"
+                )
+            from t6.drives import Drive
+
+            drive = imports.store.add_drive(Drive(label="Synthetic operational"))
+            key = store.release([drive.id], {"project_text": "Synthetic project"}, "unknown")
+            original = app.test_client().get("/shipments/" + key).text
+            with imports.store.connect() as db:
+                original_members = db.execute(
+                    "SELECT * FROM shipment_members WHERE shipment_id=?", (key,)
+                ).fetchall()
+            result = app.test_cli_runner().invoke(
+                args=["import-log-sheet", "--lineage", "synthetic-log", "--workbook", str(path)]
+            )
+            self.assertEqual(result.exit_code, 0, result.output)
+            self.assertEqual(
+                create_app(database).test_client().get("/shipments/" + key).text, original
+            )
+            self.assertEqual(len(store.all()), 3)
+            with imports.store.connect() as db:
+                self.assertEqual(
+                    db.execute(
+                        "SELECT * FROM shipment_members WHERE shipment_id=?", (key,)
+                    ).fetchall(),
+                    original_members,
+                )
+                self.assertEqual(db.execute("PRAGMA foreign_key_check").fetchall(), [])
+
+    def test_combined_failure_recovery_retains_every_row_and_no_partial_snapshot(self):
+        from test_imports import synthetic_workbook
+
+        with tempfile.TemporaryDirectory() as directory:
+            inventory = Path(directory) / "synthetic-inventory.xlsx"
+            log = Path(directory) / "synthetic-log.xlsx"
+            database = str(Path(directory) / "synthetic.sqlite")
+            synthetic_workbook(inventory, [["Original synthetic", "SYN-A", "YES"]])
+            log_workbook(log)
+            imports = InventoryImports(database)
+            imports.run("synthetic-inventory", str(inventory))
+            held = imports.store.find_by_serial("SYN-A")
+            assert held is not None
+            identity = held.id
+            fired = False
+
+            def fail(stage):
+                nonlocal fired
+                if stage == "imported-snapshot-written" and not fired:
+                    fired = True
+                    raise RuntimeError("synthetic private fault")
+
+            imports = InventoryImports(database, store=SQLiteDriveStore(database, checkpoint=fail))
+            with self.assertRaises(RuntimeError):
+                imports.run("synthetic-log", str(log), kind="log-sheet")
+            self.assertTrue(fired)
+            self.assertEqual(imports.status("synthetic-log"), "failed")
+            self.assertEqual(Shipments(imports.store.connect, imports.store.assignments).all(), [])
+            with imports.store.connect() as db:
+                self.assertEqual(
+                    db.execute(
+                        "SELECT COUNT(*) FROM imported_event_sources WHERE lineage='synthetic-log'"
+                    ).fetchone()[0],
+                    8,
+                )
+                self.assertEqual(
+                    db.execute(
+                        "SELECT COUNT(*) FROM import_evidence WHERE lineage='synthetic-log'"
+                    ).fetchone()[0],
+                    11,
+                )
+            imports.store.set_serial(identity, "SYN-CORRECTED")
+            imports = InventoryImports(database)
+            imports.run("synthetic-log", str(log), kind="log-sheet")
+            self.assertEqual(len(imports.store.inventory.all()), 2)
+            self.assertEqual(len(imports.store.list_events(identity)), 6)
+            manifests = Shipments(imports.store.connect, imports.store.assignments).all()
+            self.assertEqual(sorted(len(s["lines"]) for s in manifests), [2, 3])
+            self.assertEqual(manifests[0]["lines"][0]["serial"], "SYN-A")
+            before = self.state(imports.store)
+            for lineage, path, kind in [
+                ("synthetic-inventory", inventory, "inventory"),
+                ("synthetic-log", log, "log-sheet"),
+            ]:
+                imports.run(lineage, str(path), kind=kind)
+            self.assertEqual(self.state(imports.store), before)
+            page = create_app(database).test_client().get("/drive/" + identity).text
+            self.assertIn("Unknown date", page)
+            self.assertIn("Original synthetic", page)
+
     @staticmethod
     def state(store):
         with store.connect() as db:
@@ -115,6 +224,9 @@ class MovementTests(unittest.TestCase):
                     "custody_events",
                     "shipments",
                     "shipment_members",
+                    "import_sources",
+                    "imported_event_sources",
+                    "import_observations",
                     "import_receipts",
                     "import_evidence",
                 ]

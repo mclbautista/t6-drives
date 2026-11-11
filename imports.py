@@ -2,7 +2,8 @@
 
 Capture evidence before core starts writing: even a failed importer leaves every
 source row recoverable. A completed pass reconciles this journal with receipts
-and core review reasons. No browser routes or raw-data diagnostics are installed.
+and core review reasons. The exception browser is read-only; administration
+and raw-data diagnostics are never exposed as mutation endpoints.
 """
 
 import hashlib
@@ -72,6 +73,13 @@ class InventoryImports:
                     evidence TEXT NOT NULL, status TEXT NOT NULL, reasons TEXT NOT NULL);
             """)
 
+        with self.store.connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            if "kind" not in {r[1] for r in db.execute("PRAGMA table_info(import_sources)")}:
+                db.execute(
+                    "ALTER TABLE import_sources ADD COLUMN kind TEXT NOT NULL DEFAULT 'inventory'"
+                )
+
     def evidence(self, lineage: str, *, exceptions_only: bool = True) -> list[dict[str, Any]]:
         """Private host boundary; callers must not send evidence to routine logs."""
         with self.store.connect() as db:
@@ -106,18 +114,28 @@ class InventoryImports:
         with self.store.connect() as db:
             db.execute("BEGIN IMMEDIATE")
             held = db.execute(
-                "SELECT workbook,digest FROM import_sources WHERE lineage=?", (lineage,)
+                "SELECT workbook,digest,kind FROM import_sources WHERE lineage=?", (lineage,)
             ).fetchone()
-            if held and held != (str(path), digest):
+            if held and held != (str(path), digest, kind):
                 raise ValueError("Input changed; explicit reconciliation required.")
+            if (
+                held
+                and db.execute(
+                    "SELECT status FROM import_sources WHERE lineage=?", (lineage,)
+                ).fetchone()[0]
+                == "complete"
+            ):
+                # A completed lineage is a receipt, not synchronization against
+                # mutable facts/cache. Keep its original reconciliation stable.
+                return
             if not held:
                 if db.execute(
                     "SELECT 1 FROM import_sources WHERE workbook=? OR digest=?", (str(path), digest)
                 ).fetchone():
                     raise ValueError("Input already registered; explicit reconciliation required.")
                 db.execute(
-                    "INSERT INTO import_sources VALUES(?,?,?,?,?)",
-                    (lineage, str(path), digest, raw, "pending"),
+                    "INSERT INTO import_sources VALUES(?,?,?,?,?,?)",
+                    (lineage, str(path), digest, raw, "pending", kind),
                 )
         try:
             source = load_workbook(BytesIO(raw), read_only=True, data_only=False)

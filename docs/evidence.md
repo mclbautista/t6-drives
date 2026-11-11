@@ -1,16 +1,42 @@
 # Synthetic verification and remaining evidence
 
-The automated seam is Flask's HTTP test client against a temporary SQLite file and the real core domain. No fake store, mocked core, real inputs or external services are used. Creation, permanent ID/reopen, full facts/review, searches including accepted-only exact lookup and visibly uncertain candidate, invalid values, editing, serial normalization, promotion and collisions, sole-identity removal, concurrent claims, escaped HTML, CSRF, Host, Origin and non-mutating GET are covered by the test suite. See `tests/test_inventory.py` for executable scenarios. The concurrency test makes two real HTTP requests with separate clients and separate SQLite connections.
+## Current checkpoint
 
-During implementation the following red/green commands were run using Python 3.12, the exact core commit extracted from local Git history, and locally cached Flask dependencies (paths omitted here). Scratch transcripts were retained outside the repository:
+The principal seam is observable HTTP/UI against the real Flask app, temporary SQLite and core pinned to `f4b7618c2eb14bb5f85ea3c1fa597843448bc3af`. No fake store, mocked core, real inputs or live operational services are used.
 
-- `python -m unittest discover -s tests` — failed before the app existed (`ModuleNotFoundError`), then passed the initial form test.
-- The same command — failed create/reopen at the missing form token, then passed after create and SQLite reopening were implemented.
-- The same command — failed full-facts/normalization behavior, then passed after the inventory implementation.
-- Later security, collision, editing and concurrency scenarios were added against the implementation and passed on first execution. They are regression evidence, not claimed as separate red-first cycles. The requested strict one-failing-test-per-slice discipline was therefore not fully met.
+- `tests/test_inventory.py` covers creation, stable permanent ID/reopen, full facts/review, unknown/T6/Studio ownership, text/review searches, accepted-only exact lookup, visibly uncertain candidates, invalid values, editing, serial normalization/correction/removal, explicit promotion and collisions. Sole-identity removal is rejected. Stale edits and stale promotion return 409 without replacing newer facts.
+- Concurrent HTTP requests use separate clients and SQLite connections. Existing Drives attempting to swap occupied serials both fail with their complete detail facts unchanged, including after reopen. Existing Drives racing for one free serial produce one winner and one unchanged loser; concurrent creation likewise yields one accepted-serial owner. These tests cover the evidence currently stored, not future Assignment/custody/shipment histories.
+- Browser writes are checked for CSRF tokens, Host/Origin rejection, non-mutating GETs and escaped HTML. A validation-error regression verifies submitted synthetic text is absent from the error response. Rejected validation forms clear values and must be re-entered.
+- `tests/test_browser.py` starts a real loopback HTTP server and Chromium using Playwright. It exercises create/detail/inventory/edit navigation, uncertain search, accepted-only lookup, unknown ownership, stale-form rejection and explicit promotion. The checkpoint run passed with Chromium `143.0.7499.4` and no browser console/page errors. Synthetic screenshots (`uncertain-inventory.png`, `edited-detail.png`), `browser-trace.zip` and `browser-result.json` are retained outside git when `BROWSER_ARTIFACTS` is set; see README for reproduction. Traces contain synthetic form/session data and are not public deployment evidence.
 
-The core checkout used for verification was shown by `git merge-base --is-ancestor f4b7618c2eb14bb5f85ea3c1fa597843448bc3af HEAD` to contain the required merge; tests used an archive of that exact merge, not its newer HEAD. The environment could not resolve GitHub, so a clean network installation from `requirements.lock` and CI have not been verified locally.
+The following commands were rerun successfully with Python 3.12 at this checkpoint:
 
-Remaining: browser-based navigation has not been independently exercised; tests use Flask's real in-process HTTP transport. There is no populated Assignment, custody or shipment history yet, so preservation across editing must be tested with those future slices. Project/status filtering, durable import/exception evidence, history, snapshots, migrations/rollback, backup/restore and operational isolation are deferred. Synthetic tests do not establish office-only access or real-data preservation. G1–G5 remain open; do not mark tickets or operational acceptance complete on this evidence.
+```sh
+BROWSER_ARTIFACTS=<private-scratch-directory> .venv/bin/python -m unittest discover -s tests -v
+# 15 tests passed, including the real Chromium scenario
+.venv/bin/python -m compileall -q app.py tests
+.venv/bin/mypy
+# Success: no issues found in 3 source files (check_untyped_defs, not strict typing)
+.venv/bin/ruff check app.py tests
+.venv/bin/ruff format --check app.py tests
+.venv/bin/python -m build
+# Built sdist and wheel using the declared setuptools backend
+```
 
-A later red-first validation-error test exposed submitted synthetic text echoed in a 400 response; after clearing form values on errors it passed. This means a rejected form must be re-entered. An attempt to start the loopback server in this sandbox returned `Operation not permitted` while binding the socket; no live-browser or socket smoke test is claimed. The in-process HTTP suite passed. No type checker was configured or run for this untyped initial slice; compilation and Ruff are the configured static checks.
+A fresh Python 3.12 virtual environment installed `requirements.lock` through uv and the built wheel with `--no-deps`. An isolated (`python -I`) import of that installed wheel served a real loopback GET `/` returning HTTP 200. Installed core metadata recorded the exact required Git commit. Package caches may be used; this is not a cache-free network reproducibility claim. The isolated build fetched its declared backend successfully. Earlier DNS/socket restrictions no longer describe this checkpoint. GitHub Actions is configured to install locked runtime/dev dependencies and Chromium, then run tests, compilation, mypy, build and Ruff; remote CI has not been claimed green.
+
+## Development provenance
+
+Initial red/green commands used Python 3.12, an archive of the exact core merge from local Git history, and locally cached Flask dependencies. Scratch transcripts were retained outside the repository:
+
+- `python -m unittest discover -s tests` failed before the app existed (`ModuleNotFoundError`), then passed the initial form test.
+- The same command failed create/reopen at the missing form token, then passed after create and SQLite reopening were implemented.
+- The same command failed full-facts/normalization behavior, then passed after the inventory implementation.
+- Later security, collision, editing and concurrency scenarios were added against the implementation and passed on first execution. They are regression evidence, not separate red-first cycles. The requested strict one-failing-test-per-slice discipline was not fully met.
+- A later red-first validation-error test exposed submitted synthetic text echoed in a 400 response; after clearing form values on errors it passed.
+
+## Acceptance boundaries
+
+This checkpoint supplies ticket #2's inventory/fact/browser foundation for parent AC01, AC02, AC03, AC12 and AC18, not completion of those cross-slice parent criteria. There is no populated Assignment, custody or shipment history, so preservation across fact edits and rejected writes must be rechecked when those workflows exist. Project/status filtering, import concurrency/receipts/exceptions, historical snapshots/printing, general migrations/rollback, backup/restore, container persistence and operational isolation remain deferred. Only fresh initialization and additive revision/ownership columns for earlier synthetic stores are present; no production schema migration or rollback is established.
+
+Committed fixtures and documentation use invented data only; browser artifacts and disposable stores stay outside git. No real workbooks, private source evidence or operational configuration were accessed for this checkpoint. Synthetic tests do not establish office-only access, authenticated attribution, recovery or real-data preservation. G1–G5 remain open. No accounts, role enforcement, live sync, automatic merging, deployment, real-data rehearsal, production import, workbook freeze or cutover is authorized by this slice. Do not check or close parent acceptance on this evidence.

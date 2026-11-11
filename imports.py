@@ -16,11 +16,11 @@ from tempfile import TemporaryDirectory
 from typing import Any
 
 import click
-from flask import Flask
+from flask import Flask, make_response, render_template_string, request
 from openpyxl import load_workbook
 from t6.domain import Project
 from t6.drives import DriveStore, Ref
-from t6.drives.importer import import_per_project_workbook
+from t6.drives.importer import import_log_sheet_workbook, import_per_project_workbook
 from t6.lookup import Index, Lookup
 
 from assignments import Assignments
@@ -92,7 +92,9 @@ class InventoryImports:
             ).fetchone()
         return row[0] if row else None
 
-    def run(self, lineage: str, workbook: str) -> None:
+    def run(self, lineage: str, workbook: str, *, kind: str = "inventory") -> None:
+        if kind not in ("inventory", "log-sheet"):
+            raise ValueError("Unknown import kind")
         path = Path(workbook)
         if not path.is_absolute() or path.is_symlink() or not lineage.strip():
             raise ValueError("Use a stable absolute input and nonblank lineage.")
@@ -157,9 +159,17 @@ class InventoryImports:
                 snapshot.write_bytes(raw)
                 keys = {row_key(str(snapshot), entry[3], entry[4]): entry[0] for entry in entries}
                 protocol: DriveStore = SQLiteDriveStore(
-                    self.database, checkpoint=self.store.checkpoint, receipt_keys=keys
+                    self.database,
+                    checkpoint=self.store.checkpoint,
+                    receipt_keys=keys,
+                    source_lineage=lineage,
                 )
-                result = import_per_project_workbook(
+                importer = (
+                    import_log_sheet_workbook
+                    if kind == "log-sheet"
+                    else import_per_project_workbook
+                )
+                result = importer(
                     snapshot,
                     protocol,
                     lookup=CachedProjectReader(self.database).lookup(),
@@ -210,6 +220,9 @@ class InventoryImports:
                         "UPDATE import_evidence SET status=?,reasons=? WHERE row_key=?",
                         (state, json.dumps(why, ensure_ascii=False), key),
                     )
+                from imported_shipments import finalize_shipments
+
+                finalize_shipments(db, lineage, self.store.assignments, self.store.checkpoint)
                 db.execute(
                     "UPDATE import_sources SET status='complete' WHERE lineage=?", (lineage,)
                 )
@@ -220,6 +233,51 @@ class InventoryImports:
 
 
 def register_imports(app: Flask, database: str) -> None:
+    imports = InventoryImports(database)
+
+    @app.get("/exceptions")
+    def exception_list():
+        # Same restricted office/host boundary as inventory. Not authentication:
+        # no deployment may expose this data until the access gates are resolved.
+        query = request.args.get("q", "").strip().casefold()
+        with imports.store.connect() as db:
+            rows = db.execute(
+                "SELECT lineage,workbook,sheet,row,row_key,evidence,status,reasons FROM import_evidence WHERE status IN ('pending','exception') ORDER BY lineage,sheet,row"
+            ).fetchall()
+        entries = [
+            dict(
+                zip(
+                    ("lineage", "workbook", "sheet", "row", "key", "evidence", "status", "reasons"),
+                    row,
+                )
+            )
+            for row in rows
+            if not query or query in " ".join(map(str, row)).casefold()
+        ]
+        response = make_response(
+            render_template_string(
+                """<!doctype html><title>Import exceptions</title><h1>Import exceptions</h1><a href="/">Inventory</a><p>Private source evidence — read only. Access is not authenticated; operational deployment remains gated. Pending means a failed or incomplete run, not discarded evidence.</p><form><label>Search source, reason or evidence <input name="q" value="{{ q }}"></label><button>Find</button></form>{% for e in entries %}<article><h2>{{ e.lineage }} — {{ e.sheet }} — Row {{ e.row }}</h2><p>Workbook: {{ e.workbook }}</p><p>Source row key: {{ e.key }} — {{ e.status }}</p><pre>{{ e.reasons }}</pre><pre>{{ e.evidence }}</pre></article>{% endfor %}""",
+                entries=entries,
+                q=request.args.get("q", ""),
+            )
+        )
+        response.headers["Cache-Control"] = "no-store"
+        response.headers["Referrer-Policy"] = "no-referrer"
+        return response
+
+    @app.cli.command("import-log-sheet")
+    @click.option("--lineage", required=True)
+    @click.option("--workbook", required=True)
+    def import_log_sheet(lineage: str, workbook: str) -> None:
+        """Host-only combined inventory/movement import. No HTTP upload."""
+        try:
+            InventoryImports(database).run(lineage, workbook, kind="log-sheet")
+        except Exception:  # noqa: BLE001
+            raise click.ClickException(
+                "Import stopped. Inspect private evidence and retry unchanged inputs."
+            ) from None
+        click.echo("Log-sheet import complete; preservation still requires private reconciliation.")
+
     @app.cli.command("import-inventory")
     @click.option("--lineage", required=True)
     @click.option("--workbook", required=True)

@@ -47,12 +47,17 @@ class SQLiteDriveStore:
         *,
         checkpoint: Callable[[str], None] | None = None,
         receipt_keys: dict[str, str] | None = None,
+        source_lineage: str | None = None,
     ):
+        self.source_lineage = source_lineage
         self.receipt_keys = receipt_keys
         self.inventory = Inventory(database)
         self.assignments = Assignments(database)
         self.custody = Custody(self.connect)
         self.checkpoint = checkpoint or (lambda stage: None)
+        from imported_shipments import initialize
+
+        initialize(self.connect, self.assignments)
         with self.connect() as db:
             db.execute("""CREATE TABLE IF NOT EXISTS import_receipts (
                 row_key TEXT PRIMARY KEY, drive_id TEXT NOT NULL REFERENCES drives(id))""")
@@ -146,8 +151,8 @@ class SQLiteDriveStore:
         return row[0] if row else None
 
     @staticmethod
-    def _event(db: sqlite3.Connection, drive_id: str, event: CustodyEvent) -> None:
-        db.execute(
+    def _event(db: sqlite3.Connection, drive_id: str, event: CustodyEvent) -> int:
+        cursor = db.execute(
             "INSERT INTO custody_events(drive_id,event,recipient,actor_mode) VALUES(?,?,?,?)",
             (
                 drive_id,
@@ -156,6 +161,9 @@ class SQLiteDriveStore:
                 "imported / unknown authentication",
             ),
         )
+
+        assert cursor.lastrowid is not None
+        return cursor.lastrowid
 
     def import_row(
         self, row_key: str, drive: Drive, assignment: Assignment, events: Sequence[CustodyEvent]
@@ -205,8 +213,29 @@ class SQLiteDriveStore:
                     "INSERT INTO assignments(drive_id,value) VALUES(?,?)",
                     (held.id, Assignments.encode(assignment)),
                 )
-            for event in events:
-                self._event(db, held.id, event)
+            for position, event in enumerate(events):
+                if self.source_lineage and event.kind == CustodyKind.RELEASED:
+                    from imported_shipments import shipment_key
+
+                    event = replace(
+                        event,
+                        shipment_id=shipment_key(
+                            self.source_lineage, event.shipment_id or f"{row_key}:{position}"
+                        ),
+                    )
+                event_id = self._event(db, held.id, event)
+                if self.source_lineage:
+                    db.execute(
+                        "INSERT INTO imported_event_sources VALUES(?,?,?,?,?,?)",
+                        (
+                            event_id,
+                            self.source_lineage,
+                            row_key,
+                            encode(drive),
+                            Assignments.encode(assignment),
+                            event.shipment_id,
+                        ),
+                    )
                 self.checkpoint("event-written")
             db.execute("INSERT INTO import_receipts VALUES(?,?)", (row_key, held.id))
             if additional_facts:

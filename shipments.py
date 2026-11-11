@@ -33,7 +33,7 @@ class Shipments:
                     position INTEGER NOT NULL,
                     drive_id TEXT NOT NULL REFERENCES drives(id),
                     event_id INTEGER NOT NULL UNIQUE REFERENCES custody_events(id),
-                    PRIMARY KEY(shipment_id, position), UNIQUE(shipment_id, drive_id));
+                    PRIMARY KEY(shipment_id, position));
                 CREATE TRIGGER IF NOT EXISTS immutable_shipment_update
                     BEFORE UPDATE ON shipments BEGIN
                     SELECT RAISE(ABORT, 'Shipment snapshots are immutable'); END;

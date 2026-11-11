@@ -1,0 +1,23 @@
+# Synthetic loopback use only. Never change binding before G1–G3 approval.
+services:
+  app:
+    # Immutable locally built image ID, or independently verified registry digest.
+    image: ${DRIVES_IMAGE:?Set an immutable sha256 image ID or repository@sha256 digest}
+    pull_policy: never
+    ports:
+      - "127.0.0.1:${DRIVES_PORT:-5000}:8080"
+    environment:
+      DRIVES_DB: /data/drives.sqlite
+      DRIVES_SESSION_SECRET: ${DRIVES_SESSION_SECRET:?Set a private runtime secret}
+    volumes:
+      - drives_data:/data
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=64m,mode=1777
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    init: true
+    restart: "no"
+    stop_grace_period: 30s
+volumes:
+  drives_data:

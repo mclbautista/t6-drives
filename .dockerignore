@@ -1,0 +1,13 @@
+# Allowlist: private inputs, .env, git and test artifacts never enter context.
+**
+!Dockerfile
+!requirements.lock
+!app.py
+!assignments.py
+!custody.py
+!shipments.py
+!import_store.py
+!imports.py
+!imported_shipments.py
+!runtime.py
+!backups.py

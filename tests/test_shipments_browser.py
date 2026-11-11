@@ -9,8 +9,7 @@ from pathlib import Path
 
 from playwright.sync_api import expect, sync_playwright
 from test_assignments import NEW, OLD, Reader, export
-from test_browser import QuietHandler
-from werkzeug.serving import make_server
+from test_browser import loopback_server
 
 from app import create_app
 
@@ -26,7 +25,7 @@ class ShipmentBrowserTest(unittest.TestCase):
             self.assertEqual(app.test_cli_runner().invoke(args=["refresh-projects"]).exit_code, 0)
 
             def start(application):
-                server = make_server("127.0.0.1", 5000, application, request_handler=QuietHandler)
+                server = loopback_server(application)
                 thread = threading.Thread(target=server.serve_forever, daemon=True)
                 thread.start()
                 return server, thread
@@ -49,7 +48,7 @@ class ShipmentBrowserTest(unittest.TestCase):
                     locations = []
                     ids = []
                     for n in range(2):
-                        page.goto("http://127.0.0.1:5000/")
+                        page.goto(f"http://127.0.0.1:{server.server_port}/")
                         page.get_by_role("link", name="New Drive", exact=True).click()
                         page.get_by_label("Description", exact=True).fill(
                             f"synthetic printed drive {n}"
@@ -171,6 +170,10 @@ class ShipmentBrowserTest(unittest.TestCase):
                     thread.join(timeout=10)
                     server.server_close()
                     server, thread = start(create_app(path))
+                    shipment = (
+                        f"http://127.0.0.1:{server.server_port}/shipments/"
+                        + shipment.rsplit("/", 1)[-1]
+                    )
                     page.goto(shipment)
                     self.assertEqual(saved, page.locator("#manifest").inner_html())
                     expect(page.get_by_text("Synthetic show", exact=False)).to_be_visible()

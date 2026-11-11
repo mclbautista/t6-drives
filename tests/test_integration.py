@@ -26,6 +26,52 @@ class IntegrationTest(unittest.TestCase):
             data={"csrf": self.csrf, "description": "synthetic combined", "needs_review": "on"},
         ).headers["Location"]
 
+    def test_imported_unknown_owner_ships_with_cached_project_and_stable_manifest(self):
+        from test_assignments import NEW
+        from test_imports import synthetic_workbook
+
+        from imports import InventoryImports
+
+        source = Path(self.temp.name) / "synthetic.xlsx"
+        synthetic_workbook(source, [["Imported synthetic", "SYN-IMPORT-SHIP", "YES"]])
+        imports = InventoryImports(self.path)
+        imports.run("synthetic-combined", str(source))
+        drive = imports.store.find_by_serial("SYN-IMPORT-SHIP")
+        assert drive is not None
+        location = "/drive/" + drive.id
+        detail = self.client.get(location).text
+        self.assertIn("Unknown ownership", detail)
+        self.assertIn("Custody status: in custody", detail)
+        self.assertIn("Synthetic show", detail)
+        assignment = imports.store.assignment_history(drive.id)
+        self.assertEqual(assignment[0].project.page_id, OLD)
+        evidence = imports.evidence("synthetic-combined", exceptions_only=False)
+        response = self.client.post(
+            "/shipments/new",
+            data={"csrf": self.csrf, "drive_id": drive.id, "project_page_id": OLD},
+        )
+        self.assertEqual(response.status_code, 303)
+        shipment = response.headers["Location"]
+        saved = self.client.get(shipment).data
+        for value in (drive.id, "SYN-IMPORT-SHIP", "Synthetic show"):
+            self.assertIn(value, saved.decode())
+        self.assertIn("Unknown ownership", self.client.get(location).text)
+        self.assertIn("Custody status: released", self.client.get(location).text)
+        self.assertEqual(imports.store.assignment_history(drive.id), assignment)
+        self.assertEqual(len(imports.store.list_events(drive.id)), 2)
+        InventoryImports(self.path).run("synthetic-combined", str(source))
+        self.assertEqual(
+            InventoryImports(self.path).evidence("synthetic-combined", exceptions_only=False),
+            evidence,
+        )
+        self.assertEqual(len(imports.store.list_events(drive.id)), 2)
+        self.reader.payload = export(NEW, (OLD,), name="Synthetic renamed cache")
+        self.assertEqual(self.app.test_cli_runner().invoke(args=["refresh-projects"]).exit_code, 0)
+        self.assertIn("Synthetic renamed cache", self.client.get(location).text)
+        restarted = create_app(self.path).test_client()
+        self.assertEqual(restarted.get(shipment).data, saved)
+        self.assertIn("Unknown ownership", restarted.get(location).text)
+
     def post(self, suffix, **fields):
         response = self.client.post(self.location + suffix, data={"csrf": self.csrf, **fields})
         self.assertEqual(response.status_code, 303, response.text)

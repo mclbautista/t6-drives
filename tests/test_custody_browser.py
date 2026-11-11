@@ -6,8 +6,7 @@ import unittest
 from pathlib import Path
 
 from playwright.sync_api import expect, sync_playwright
-from test_browser import QuietHandler
-from werkzeug.serving import make_server
+from test_browser import loopback_server
 
 from app import create_app
 
@@ -15,13 +14,10 @@ from app import create_app
 class CustodyBrowserTest(unittest.TestCase):
     def test_custody_kinds_and_backdated_visible_correction(self):
         with tempfile.TemporaryDirectory() as directory:
-            server = make_server(
-                "127.0.0.1",
-                5000,
+            server = loopback_server(
                 create_app(
                     str(Path(directory) / "db"), custody_actor_policy="self-declared-synthetic"
                 ),
-                request_handler=QuietHandler,
             )
             thread = threading.Thread(target=server.serve_forever, daemon=True)
             thread.start()
@@ -29,7 +25,7 @@ class CustodyBrowserTest(unittest.TestCase):
                 with sync_playwright() as playwright:
                     browser = playwright.chromium.launch()
                     page = browser.new_page()
-                    page.goto("http://127.0.0.1:5000/")
+                    page.goto(f"http://127.0.0.1:{server.server_port}/")
                     page.get_by_role("link", name="New Drive", exact=True).click()
                     page.get_by_label("Description", exact=True).fill("synthetic custody browser")
                     page.get_by_label("Needs review", exact=True).check()

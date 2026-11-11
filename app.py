@@ -364,7 +364,7 @@ def create_app(
             HISTORY, history=custody.history(drive_id), drive_id=drive_id
         )
         return render_template_string(
-            """<!doctype html><title>Drive</title><h1>Drive {{ d.id }}</h1><a href="/">Inventory</a> <a href="/drive/{{ d.id }}/edit">Edit</a> <a href="/drive/{{ d.id }}/custody">Record custody</a><p>Custody status: {{ status }}</p><p>G2 unresolved: synthetic use only; actors are not authenticated. Operational deployment remains gated.</p>{{ history_html|safe }}<dl>{% for name in fields %}{% if values.get(name) is not none %}<dt>{{ labels.get(name, name|capitalize) }}</dt><dd>{{ values[name] }}</dd>{% endif %}{% endfor %}<dt>Ownership</dt><dd>{{ (d.owner_studio_id or "T6") if ownership_known else "Unknown ownership" }}</dd><dt>Needs review</dt><dd>{{ 'Yes' if d.needs_review else 'No' }}</dd></dl>{% if d.suspected_serial %}<form method="post" action="/drive/{{ d.id }}/promote"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="revision" value="{{ revision }}"><button>Promote suspected serial to accepted</button></form>{% endif %}{{ assignment_history|safe }}""",
+            """<!doctype html><title>Drive</title><h1>Drive {{ d.id }}</h1><a href="/">Inventory</a> <a href="/drive/{{ d.id }}/edit">Edit</a> <a href="/drive/{{ d.id }}/custody">Record custody</a><p>Custody status: {{ status }}</p><p>Actors are not authenticated; no accounts or enforced roles. Host/recovery approval remains required.</p>{{ history_html|safe }}<dl>{% for name in fields %}{% if values.get(name) is not none %}<dt>{{ labels.get(name, name|capitalize) }}</dt><dd>{{ values[name] }}</dd>{% endif %}{% endfor %}<dt>Ownership</dt><dd>{{ (d.owner_studio_id or "T6") if ownership_known else "Unknown ownership" }}</dd><dt>Needs review</dt><dd>{{ 'Yes' if d.needs_review else 'No' }}</dd></dl>{% if d.suspected_serial %}<form method="post" action="/drive/{{ d.id }}/promote"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="revision" value="{{ revision }}"><button>Promote suspected serial to accepted</button></form>{% endif %}{{ assignment_history|safe }}""",
             d=drive,
             status=custody.status(drive_id),
             history_html=history_html,
@@ -396,6 +396,7 @@ if __name__ == "__main__":
     import os
 
     logging.getLogger("werkzeug").disabled = True
-    create_app(os.environ.get("DRIVES_DB", "synthetic-inventory.sqlite")).run(
-        host="127.0.0.1", port=5000, debug=False
-    )
+    create_app(
+        os.environ.get("DRIVES_DB", "synthetic-inventory.sqlite"),
+        custody_actor_policy=os.environ.get("DRIVES_ACTOR_POLICY", "self-declared-required"),
+    ).run(host="127.0.0.1", port=5000, debug=False)

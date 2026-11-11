@@ -2,6 +2,7 @@
 
 import json
 import sqlite3
+import unicodedata
 from collections.abc import Callable, Mapping
 from dataclasses import asdict, dataclass
 from datetime import date
@@ -23,6 +24,24 @@ def reference(form: Mapping[str, str], prefix: str) -> Ref:
     page = form.get(prefix + "_page_id", "").strip() or None
     text = form.get(prefix + "_text", "").strip() or None
     return Ref(page_id=page, text=text if page or text else "Unknown")
+
+
+def declared_actor(form: Mapping[str, str], policy: str) -> str | None:
+    actor = form.get("actor", "").strip() or None
+    if policy == "self-declared-required":
+        if (
+            not actor
+            or len(actor) > 120
+            or any(
+                unicodedata.category(char).startswith("C")
+                or unicodedata.category(char) in ("Zl", "Zp")
+                for char in form.get("actor", "")
+            )
+        ):
+            raise ValueError("A self-declared actor of 1–120 printable characters is required.")
+    elif policy != "self-declared-synthetic" and actor:
+        raise ValueError("Actor entry disabled by policy.")
+    return actor
 
 
 def restore(raw: str) -> CustodyEvent:
@@ -64,9 +83,7 @@ class Custody:
         return status.value if status else "unknown"
 
     def append(self, drive_id: str, form: Mapping[str, str], actor_policy: str) -> None:
-        actor = form.get("actor", "").strip() or None
-        if actor and actor_policy != "self-declared-synthetic":
-            raise ValueError
+        actor = declared_actor(form, actor_policy)
         party_id = form.get("party_page_id", "").strip() or None
         party_kind = form.get("party_kind", "").strip() or None
         if bool(party_id) != bool(party_kind):
@@ -124,7 +141,7 @@ Reason: {{ row.event.reason or 'Unknown reason' }};
 
 FORM = """<!doctype html><title>Record custody</title><h1>Record custody</h1>
 <a href="/drive/{{ drive_id }}">Drive details</a>
-<p>G2 unresolved: synthetic use only. Self-declared actors are not authenticated; operational deployment remains gated.</p>
+<p>Self-declared actors are not authenticated; no accounts or enforced roles. Operational deployment remains gated by host and recovery approval.</p>
 <form method="post"><input type="hidden" name="csrf" value="{{ csrf }}">
 <label>Kind <select name="kind" aria-label="Kind">{% for kind in kinds %}<option>{{ kind.value }}</option>{% endfor %}</select></label>
 <label>Business date (blank = Unknown date) <input name="on" type="date"></label>
@@ -133,7 +150,7 @@ FORM = """<!doctype html><title>Record custody</title><h1>Record custody</h1>
 <label>Existing party page ID <input name="party_page_id"></label>
 <label>Project unresolved text <input name="project_text"></label>
 <label>Existing Project page ID <input name="project_page_id"></label>
-{% if actor_policy == 'self-declared-synthetic' %}<label>Self-declared actor (not authenticated; blank = unknown) <input name="actor"></label>{% else %}<p>Recorded actor: Unknown actor (G2 unresolved).</p>{% endif %}
+{% if actor_policy in ['self-declared-required', 'self-declared-synthetic'] %}<label>Self-declared actor (not authenticated) <input name="actor" maxlength="120" {% if actor_policy == 'self-declared-required' %}required{% endif %}></label>{% else %}<p>Recorded actor: Unknown actor (synthetic compatibility policy).</p>{% endif %}
 <label>Reason (required for retirement) <input name="reason"></label>
 <label>Correction of event (optional) <input name="correction_of" value="{{ correction }}"></label>
 <button>Append custody event</button></form>"""
@@ -142,8 +159,8 @@ FORM = """<!doctype html><title>Record custody</title><h1>Record custody</h1>
 def register_custody(
     app: Flask, custody: Custody, csrf: Callable[[], str], actor_policy: str
 ) -> None:
-    if actor_policy not in ("unknown", "self-declared-synthetic"):
-        raise ValueError("Unsupported synthetic actor policy; G2 remains unresolved.")
+    if actor_policy not in ("unknown", "self-declared-synthetic", "self-declared-required"):
+        raise ValueError("Unsupported actor policy.")
 
     @app.route("/drive/<drive_id>/custody", methods=["GET", "POST"])
     def record_custody(drive_id: str):
@@ -158,7 +175,7 @@ def register_custody(
                 abort(404)
             except (ValueError, TypeError):
                 return (
-                    "Invalid custody event. Retirement requires a reason; use valid dates, references and correction IDs. Reload the form to retry.",
+                    "Invalid custody event. Supply the required self-declared actor (1–120 printable characters), retirement reason, valid dates, references and correction IDs. Reload the form to retry.",
                     400,
                 )
             return redirect("/drive/" + drive_id, code=303)

@@ -234,6 +234,9 @@ def create_app(
             session["csrf"] = secrets.token_hex(32)
         return session["csrf"]
 
+    from imports import register_imports
+
+    register_imports(app, database)
     assignments = install(app, database, project_reader)
     register_custody(app, custody, csrf, custody_actor_policy)
 

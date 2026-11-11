@@ -9,6 +9,7 @@ import unittest
 from pathlib import Path
 
 from playwright.sync_api import expect, sync_playwright
+from test_assignments import OLD, PROJECT, Reader, export
 from werkzeug.serving import WSGIRequestHandler, make_server
 
 from app import create_app
@@ -24,10 +25,12 @@ class BrowserTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             artifacts = Path(os.environ.get("BROWSER_ARTIFACTS", directory))
             artifacts.mkdir(parents=True, exist_ok=True)
+            app = create_app(str(Path(directory) / "synthetic.sqlite"), Reader(export()))
+            self.assertEqual(app.test_cli_runner().invoke(args=["refresh-projects"]).exit_code, 0)
             server = make_server(
                 "127.0.0.1",
                 5000,
-                create_app(str(Path(directory) / "synthetic.sqlite")),
+                app,
                 request_handler=QuietHandler,
             )
             thread = threading.Thread(target=server.serve_forever, daemon=True)
@@ -99,6 +102,44 @@ class BrowserTest(unittest.TestCase):
                     expect(
                         page.get_by_role("button", name="Promote suspected serial to accepted")
                     ).to_have_count(0)
+                    page.get_by_label("Cached Project", exact=False).select_option(OLD)
+                    page.get_by_label("Assignment label", exact=True).fill("synthetic old label")
+                    page.get_by_label("Start date", exact=True).fill("2024-03-10")
+                    page.get_by_role("button", name="Add Assignment", exact=True).click()
+                    expect(
+                        page.get_by_text("Label: synthetic old label", exact=False)
+                    ).to_be_visible()
+                    page.get_by_label("Unresolved Project text", exact=True).fill("SYN")
+                    page.get_by_role("button", name="Add Assignment", exact=True).click()
+                    expect(page.get_by_text("Unresolved: SYN", exact=False)).to_be_visible()
+                    expect(
+                        page.get_by_role("button", name="End Assignment", exact=True)
+                    ).to_have_count(2)
+                    first = page.locator("li[data-assignment-id]").filter(
+                        has_text="synthetic old label"
+                    )
+                    first.get_by_label("End date", exact=True).fill("2024-03-11")
+                    first.get_by_role("button", name="End Assignment", exact=True).click()
+                    expect(page.get_by_text("End: 2024-03-11", exact=False)).to_be_visible()
+                    expect(
+                        page.get_by_role("button", name="End Assignment", exact=True)
+                    ).to_have_count(1)
+                    page.get_by_role("link", name="Inventory", exact=True).click()
+                    page.get_by_label("Project (open use)", exact=False).select_option(PROJECT)
+                    page.get_by_role("button", name="Find", exact=True).click()
+                    expect(page.get_by_role("link", name=drive_id, exact=True)).to_have_count(0)
+                    page.get_by_label("Project (open use)", exact=False).select_option("")
+                    page.get_by_label("Unresolved Project text (exact, open use)", exact=True).fill(
+                        "SYN"
+                    )
+                    page.get_by_role("button", name="Find", exact=True).click()
+                    expect(page.get_by_role("link", name=drive_id, exact=True)).to_be_visible()
+                    expect(
+                        page.get_by_text(
+                            "Open Project use (not custody): Unresolved: SYN", exact=True
+                        )
+                    ).to_be_visible()
+                    page.get_by_role("link", name=drive_id, exact=True).click()
                     page.screenshot(path=str(artifacts / "edited-detail.png"), full_page=True)
                     self.assertEqual(errors, [])
                     context.tracing.stop(path=str(artifacts / "browser-trace.zip"))
@@ -117,6 +158,9 @@ class BrowserTest(unittest.TestCase):
                                     "stale form rejection",
                                     "explicit promotion",
                                     "unknown ownership",
+                                    "cached and unresolved Assignments",
+                                    "explicit Assignment end and history",
+                                    "open Project filters independent of custody",
                                 ],
                             },
                             indent=2,

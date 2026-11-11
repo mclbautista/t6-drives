@@ -14,6 +14,8 @@ from flask import Flask, abort, redirect, render_template_string, request, sessi
 from t6.drives import Drive, FormFactor, normalize_serial
 from werkzeug.exceptions import HTTPException
 
+from assignments import ProjectReader, install
+
 FIELDS = (
     "serial",
     "suspected_serial",
@@ -191,7 +193,7 @@ FORM = """<!doctype html><title>{{ title }}</title><h1>{{ title }}</h1>
 <p><label><input type="checkbox" name="needs_review" {% if values.get('needs_review') %}checked{% endif %}> Needs review</label></p><button>Save</button></form>"""
 
 
-def create_app(database: str) -> Flask:
+def create_app(database: str, project_reader: ProjectReader | None = None) -> Flask:
     app = Flask(__name__)
     app.secret_key = secrets.token_bytes(32)
     app.config.update(
@@ -225,11 +227,15 @@ def create_app(database: str) -> Flask:
             session["csrf"] = secrets.token_hex(32)
         return session["csrf"]
 
+    assignments = install(app, database, project_reader)
+
     @app.get("/")
     def index():
         q = request.args.get("q", "").strip().casefold()
         serial = request.args.get("serial", "").strip()
         review = request.args.get("review", "")
+        project = request.args.get("project", "")
+        unresolved = request.args.get("project_text", "")
         drives = [inventory.exact(serial)] if serial else inventory.all()
         drives = [
             d
@@ -243,11 +249,14 @@ def create_app(database: str) -> Flask:
                 )
             )
             and (review not in ("yes", "no") or d.needs_review == (review == "yes"))
+            and (not (project or unresolved) or assignments.matches(d.id, project, unresolved))
         ]
         return render_template_string(
-            """<!doctype html><title>Inventory</title><h1>Inventory</h1><a href="/new">New Drive</a><form><label>Search <input name="q" value="{{ q }}"></label><label>Exact accepted serial <input name="serial"></label><label>Review <select name="review"><option value="">All</option><option value="yes">Needs review</option><option value="no">Not flagged</option></select></label><button>Find</button></form><ul>{% for d in drives %}<li><a href="/drive/{{ d.id }}">{{ d.id }}</a> {{ d.label or '' }} {{ d.description or '' }} {% if d.serial %}Accepted: {{ d.serial }}{% endif %} {% if d.suspected_serial %}Suspected (uncertain): {{ d.suspected_serial }}{% endif %} {% if d.needs_review %}Needs review{% endif %}</li>{% endfor %}</ul>""",
+            """<!doctype html><title>Inventory</title><h1>Inventory</h1><a href="/new">New Drive</a><form><label>Search <input name="q" value="{{ q }}"></label><label>Exact accepted serial <input name="serial"></label><label>Review <select name="review"><option value="">All</option><option value="yes">Needs review</option><option value="no">Not flagged</option></select></label>{{ project_cache|safe }}<button>Find</button></form><ul>{% for d in drives %}<li><a href="/drive/{{ d.id }}">{{ d.id }}</a> {{ d.label or '' }} {{ d.description or '' }} {% if d.serial %}Accepted: {{ d.serial }}{% endif %} {% if d.suspected_serial %}Suspected (uncertain): {{ d.suspected_serial }}{% endif %} {% if d.needs_review %}Needs review{% endif %}<p>Open Project use (not custody): {{ open_use(d.id)|join('; ') or 'None recorded' }}</p></li>{% endfor %}</ul>""",
             drives=drives,
             q=q,
+            project_cache=assignments.cache_html(),
+            open_use=assignments.open_use,
         )
 
     @app.route("/new", methods=["GET", "POST"])
@@ -312,8 +321,9 @@ def create_app(database: str) -> Flask:
         drive, revision, ownership_known = record
         values = json.loads(encode(drive))
         return render_template_string(
-            """<!doctype html><title>Drive</title><h1>Drive {{ d.id }}</h1><a href="/">Inventory</a> <a href="/drive/{{ d.id }}/edit">Edit</a><dl>{% for name in fields %}{% if values.get(name) is not none %}<dt>{{ labels.get(name, name|capitalize) }}</dt><dd>{{ values[name] }}</dd>{% endif %}{% endfor %}<dt>Ownership</dt><dd>{{ (d.owner_studio_id or "T6") if ownership_known else "Unknown ownership" }}</dd><dt>Needs review</dt><dd>{{ 'Yes' if d.needs_review else 'No' }}</dd></dl>{% if d.suspected_serial %}<form method="post" action="/drive/{{ d.id }}/promote"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="revision" value="{{ revision }}"><button>Promote suspected serial to accepted</button></form>{% endif %}""",
+            """<!doctype html><title>Drive</title><h1>Drive {{ d.id }}</h1><a href="/">Inventory</a> <a href="/drive/{{ d.id }}/edit">Edit</a><dl>{% for name in fields %}{% if values.get(name) is not none %}<dt>{{ labels.get(name, name|capitalize) }}</dt><dd>{{ values[name] }}</dd>{% endif %}{% endfor %}<dt>Ownership</dt><dd>{{ (d.owner_studio_id or "T6") if ownership_known else "Unknown ownership" }}</dd><dt>Needs review</dt><dd>{{ 'Yes' if d.needs_review else 'No' }}</dd></dl>{% if d.suspected_serial %}<form method="post" action="/drive/{{ d.id }}/promote"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="revision" value="{{ revision }}"><button>Promote suspected serial to accepted</button></form>{% endif %}{{ assignment_history|safe }}""",
             d=drive,
+            assignment_history=assignments.detail_html(drive_id, csrf()),
             ownership_known=ownership_known,
             values=values,
             fields=FIELDS,

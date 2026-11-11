@@ -13,11 +13,11 @@ line-length = 100
 [tool.mypy]
 python_version = "3.12"
 check_untyped_defs = true
-files = ["app.py", "tests"]
+files = ["app.py", "assignments.py", "tests"]
 
 [build-system]
 requires = ["setuptools==80.9.0"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
-py-modules = ["app"]
+py-modules = ["app", "assignments"]

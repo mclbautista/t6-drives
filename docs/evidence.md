@@ -1,5 +1,7 @@
 # Synthetic verification and remaining evidence
 
+Ticket #5's candidate verification is recorded separately in [shipment evidence](shipment-evidence.md). Checkpoints below are historical, not current feature exclusions or operational authorization.
+
 ## Combined tickets #3–4 integration checkpoint
 
 Both reviewed candidates were merged into the existing draft integration branch, #3 before #4. `app.py`, package/typecheck scope and CI conflicts were resolved by retaining both features. `tests/test_integration.py` adds three HTTP/real-SQLite regressions for cache outage plus custody writes, Assignment/custody mutation independence, AND filter intersection, retained navigation, both histories after fact edits/restart, missing/stale revision rejection and unknown ownership/default actor preservation. The Project/text filter regression initially failed because the inherited helper ORed them; independent predicates now intersect their Drive-level results.
@@ -11,7 +13,7 @@ Executed successfully from the integration worktree:
 ```sh
 .venv/bin/mypy
 # Success: no issues found in 9 source files (check_untyped_defs, not strict)
-BROWSER_ARTIFACTS=/Users/cyrilbautista/.hermes/cache/scratch/drives-implementation/integration-3-4-browser .venv/bin/python -m unittest discover -s tests -v
+BROWSER_ARTIFACTS=<private-scratch-directory> .venv/bin/python -m unittest discover -s tests -v
 # 26 tests passed, including both real Chromium scenarios; no skips
 .venv/bin/ruff check app.py assignments.py custody.py tests
 .venv/bin/ruff format --check app.py assignments.py custody.py tests

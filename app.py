@@ -201,6 +201,11 @@ def create_app(
     *,
     custody_actor_policy: str = "unknown",
 ) -> Flask:
+    # Version 0 is the existing synthetic schema, upgraded by idempotent adapters.
+    # Reject future versions before any adapter can mutate the file.
+    with sqlite3.connect(database) as db:
+        if db.execute("PRAGMA user_version").fetchone()[0] not in (0, 1):
+            raise RuntimeError("Unsupported database schema; restore a compatible recovery point.")
     app = Flask(__name__)
     app.secret_key = secrets.token_bytes(32)
     app.config.update(
@@ -219,7 +224,16 @@ def create_app(
     @app.before_request
     def guard():
         # Exact loopback authorities prevent DNS rebinding; never trust forwarded headers.
-        if request.host not in ("localhost", "localhost:5000", "127.0.0.1", "127.0.0.1:5000"):
+        authority = request.host.split(":")
+        if authority[0] not in ("localhost", "127.0.0.1") or (
+            len(authority) > 1
+            and (
+                len(authority) != 2
+                or not authority[1].isascii()
+                or not authority[1].isdigit()
+                or not 1 <= int(authority[1]) <= 65535
+            )
+        ):
             abort(400)
         if request.method not in ("GET", "HEAD", "OPTIONS"):
             origin = request.headers.get("Origin")
@@ -241,6 +255,14 @@ def create_app(
     assignments = install(app, database, project_reader)
     register_custody(app, custody, csrf, custody_actor_policy)
     register_shipments(app, Shipments(inventory.connect, assignments), csrf, custody_actor_policy)
+
+    with sqlite3.connect(database) as db:
+        db.execute("PRAGMA user_version=1")
+
+    @app.get("/health")
+    def health():
+        # Process/startup readiness only: no records, paths, counts or diagnostics.
+        return "", 204
 
     @app.get("/")
     def index():

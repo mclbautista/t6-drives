@@ -29,7 +29,7 @@ packaging==26.3
     # via gunicorn
 pycparser==3.12 ; implementation_name != 'PyPy' and platform_python_implementation != 'PyPy'
     # via cffi
-t6 @ git+https://github.com/mclbautista/t6-core.git@f4b7618c2eb14bb5f85ea3c1fa597843448bc3af
+t6 @ git+https://github.com/mclbautista/t6-core.git@d4292dcc8234b8e3888c1694427ee89688a4cbe1
     # via t6-drives
 werkzeug==3.1.9
     # via flask

@@ -325,7 +325,8 @@ class InventoryImportTests(unittest.TestCase):
             restarted.run("synthetic", str(path))
             before = complete_state(restarted.store)
             evidence = restarted.evidence("synthetic")
-            self.assertEqual(len(before), 2)
+            # core #92: an unreadable capacity blanks the fact and flags the Drive, not the row
+            self.assertEqual(len(before), 3)
             self.assertIn("unreadable", str(evidence))
             self.assertEqual(restarted.status("synthetic"), "complete")
             restarted.run("synthetic", str(path))
@@ -372,8 +373,9 @@ class InventoryImportTests(unittest.TestCase):
             imports = InventoryImports(database)
             imports.run("synthetic", str(path))
             drives = imports.store.inventory.all()
-            self.assertEqual(len(drives), 4)
-            self.assertTrue(all(d.serial is None for d in drives))
+            # core #92: "Bad capacity" is now imported with the capacity left blank
+            self.assertEqual(len(drives), 5)
+            self.assertEqual(sorted(d.serial for d in drives if d.serial), ["SYN-B"])
             self.assertTrue(imports.store.has_suspected_serial("syn-x"))
             self.assertIsNone(imports.store.find_by_serial("syn-s"))
             evidence = imports.evidence("synthetic")
@@ -384,7 +386,12 @@ class InventoryImportTests(unittest.TestCase):
                 detail = client.get("/drive/" + d.id).text
                 self.assertIn("Unresolved: Synthetic Show", detail)
                 self.assertIn("Role: Unknown", detail)
-                self.assertNotIn("not a size", detail)
+                if d.label == "Bad capacity":
+                    # core #92 puts the unreadable raw text in the review note
+                    self.assertIn("cannot read capacity", detail)
+                    self.assertIn("Needs review", detail)
+                else:
+                    self.assertNotIn("not a size", detail)
             self.assertEqual(client.get("/?serial=SYN-X").text.count("/drive/"), 0)
 
     def test_import_serial_edit_and_parallel_rerun_serialize(self):

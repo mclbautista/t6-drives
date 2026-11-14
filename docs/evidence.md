@@ -51,7 +51,7 @@ This supplies ticket #3's Assignment/cache coverage, not completion of every par
 
 ## Earlier ticket #2 checkpoint (historical evidence)
 
-The principal seam is observable HTTP/UI against the real Flask app, temporary SQLite and core pinned to `f4b7618c2eb14bb5f85ea3c1fa597843448bc3af`. No fake store, mocked core, real inputs or live operational services are used.
+The principal seam is observable HTTP/UI against the real Flask app, temporary SQLite and core pinned to release tag `v0.3.4`. No fake store, mocked core, real inputs or live operational services are used.
 
 - `tests/test_inventory.py` covers creation, stable permanent ID/reopen, full facts/review, unknown/T6/Studio ownership, text/review searches, accepted-only exact lookup, visibly uncertain candidates, invalid values, editing, serial normalization/correction/removal, explicit promotion and collisions. Sole-identity removal is rejected. Stale edits and stale promotion return 409 without replacing newer facts.
 - Concurrent HTTP requests use separate clients and SQLite connections. Existing Drives attempting to swap occupied serials both fail with their complete detail facts unchanged, including after reopen. Existing Drives racing for one free serial produce one winner and one unchanged loser; concurrent creation likewise yields one accepted-serial owner. These tests cover the evidence currently stored, not future Assignment/custody/shipment histories.

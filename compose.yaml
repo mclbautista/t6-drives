@@ -1,16 +1,17 @@
-# Synthetic loopback use only. Never change binding before G1–G3 approval.
+# Loopback by default; the office-network address only as decided in #17; never 0.0.0.0.
 services:
   app:
     # Immutable locally built image ID, or independently verified registry digest.
     image: ${DRIVES_IMAGE:?Set an immutable sha256 image ID or repository@sha256 digest}
     pull_policy: never
     ports:
-      - "127.0.0.1:${DRIVES_PORT:-5000}:8080"
+      - "${DRIVES_BIND:-127.0.0.1}:${DRIVES_PORT:-5000}:8080"
     environment:
       DRIVES_OUTBOX: /data/outbox.json
       T6_API_URL: ${T6_API_URL:?Set the t6 API address}
       T6_API_SECRET: ${T6_API_SECRET:?Set the t6 API secret bound to the custodian}
       DRIVES_SESSION_SECRET: ${DRIVES_SESSION_SECRET:?Set a private runtime secret}
+      DRIVES_ALLOWED_HOST: ${DRIVES_ALLOWED_HOST:-}
     volumes:
       - drives_data:/data
     read_only: true

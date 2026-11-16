@@ -85,7 +85,18 @@ OUTBOX = """<!doctype html><title>Outbox</title><h1>Outbox</h1><a href="/">Inven
 UNAVAILABLE = '<!doctype html><title>Unavailable</title><h1>Unavailable</h1><p role="alert">The t6 API is unavailable. Nothing was lost; try again shortly.</p><a href="/">Inventory</a>'
 
 
-def create_app(client: Client, outbox: str, *, retry_interval: float = 5.0) -> Flask:
+def create_app(
+    client: Client, outbox: str, *, retry_interval: float = 5.0, allowed_host: str = ""
+) -> Flask:
+    if allowed_host and (
+        allowed_host == "0.0.0.0"
+        or any(c in allowed_host for c in "/:*,")
+        or allowed_host.split() != [allowed_host]
+    ):
+        raise RuntimeError(
+            "DRIVES_ALLOWED_HOST must be one plain host name or IP address "
+            "(no scheme, port, list, wildcard or 0.0.0.0)."
+        )
     app = Flask(__name__)
     app.secret_key = secrets.token_bytes(32)
     app.config.update(
@@ -111,9 +122,13 @@ def create_app(client: Client, outbox: str, *, retry_interval: float = 5.0) -> F
 
     @app.before_request
     def guard():
-        # Exact loopback authorities prevent DNS rebinding; never trust forwarded headers.
+        # Exact loopback (plus one configured office host) prevents DNS rebinding;
+        # never trust forwarded headers.
         authority = request.host.split(":")
-        if authority[0] not in ("localhost", "127.0.0.1") or (
+        if (
+            authority[0] not in ("localhost", "127.0.0.1")
+            and not (allowed_host and authority[0].lower() == allowed_host.lower())
+        ) or (
             len(authority) > 1
             and (
                 len(authority) != 2

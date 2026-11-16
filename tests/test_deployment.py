@@ -1,6 +1,7 @@
 """Public HTTP and startup seam: the app owns no database and holds the API secret only at runtime."""
 
 import os
+import re
 import tempfile
 import unittest
 from pathlib import Path
@@ -13,6 +14,7 @@ from app import create_app
 from runtime import application
 
 SESSION = "s" * 32
+OFFICE = "192.0.2.10"
 
 
 class DeploymentTests(unittest.TestCase):
@@ -33,6 +35,84 @@ class DeploymentTests(unittest.TestCase):
                 ).status_code,
                 403,
             )
+
+    def test_one_configured_office_host_is_accepted_beside_loopback(self):
+        with tempfile.TemporaryDirectory() as directory:
+            app = create_app(
+                Client("http://127.0.0.1:9", SECRET, timeout=1),
+                directory + "/o.json",
+                allowed_host=OFFICE,
+            )
+            client = app.test_client()
+            self.assertEqual(
+                client.get("/health", base_url=f"http://{OFFICE}:5000").status_code, 204
+            )
+            self.assertEqual(
+                client.get("/health", base_url="http://127.0.0.1:5000").status_code, 204
+            )
+            for host in ("evil.example", OFFICE + ".evil.example", "192.0.2.11"):
+                self.assertEqual(client.get("/health", base_url="http://" + host).status_code, 400)
+            self.assertEqual(
+                client.get(
+                    "/health",
+                    base_url="http://127.0.0.1:5000",
+                    headers={"X-Forwarded-Host": OFFICE, "Forwarded": f"host={OFFICE}"},
+                ).status_code,
+                204,
+            )
+            self.assertEqual(
+                client.get(
+                    "/health",
+                    base_url="http://evil.example",
+                    headers={"X-Forwarded-Host": OFFICE, "Forwarded": f"host={OFFICE}"},
+                ).status_code,
+                400,
+            )
+            self.assertEqual(
+                client.post(
+                    "/new",
+                    base_url=f"http://{OFFICE}:5000",
+                    headers={"Origin": f"http://{OFFICE}:5001"},
+                ).status_code,
+                403,
+            )
+
+    def test_without_the_setting_an_office_authority_is_refused(self):
+        with tempfile.TemporaryDirectory() as directory:
+            app = create_app(Client("http://127.0.0.1:9", SECRET, timeout=1), directory + "/o.json")
+            response = app.test_client().get("/health", base_url=f"http://{OFFICE}:5000")
+            self.assertEqual(response.status_code, 400)
+
+    def test_a_malformed_allowed_host_stops_start_up_and_names_the_setting(self):
+        for value in ("0.0.0.0", "a,b", "*.example", "http://x", "x:5000", "a b", "a/b", "[::1]"):
+            with (
+                tempfile.TemporaryDirectory() as directory,
+                self.assertRaisesRegex(RuntimeError, "DRIVES_ALLOWED_HOST"),
+            ):
+                create_app(
+                    Client("http://127.0.0.1:9", SECRET, timeout=1),
+                    directory + "/o.json",
+                    allowed_host=value,
+                )
+        base = {
+            "DRIVES_SESSION_SECRET": SESSION,
+            "T6_API_URL": "http://127.0.0.1:9",
+            "T6_API_SECRET": SECRET,
+        }
+        with (
+            patch.dict(os.environ, {**base, "DRIVES_ALLOWED_HOST": "x:5000"}),
+            self.assertRaisesRegex(RuntimeError, "DRIVES_ALLOWED_HOST"),
+        ):
+            application()
+        with patch.dict(os.environ, {**base, "DRIVES_ALLOWED_HOST": OFFICE}):
+            office = application().test_client()
+            self.assertEqual(office.get("/health", base_url=f"http://{OFFICE}").status_code, 204)
+
+    def test_compose_publishes_on_a_configurable_address_defaulting_to_loopback(self):
+        text = (Path(__file__).parents[1] / "compose.yaml").read_text()
+        self.assertIn('"${DRIVES_BIND:-127.0.0.1}:${DRIVES_PORT:-5000}:8080"', text)
+        self.assertIn("DRIVES_ALLOWED_HOST: ${DRIVES_ALLOWED_HOST:-}", text)
+        self.assertNotIn("0.0.0.0", text.replace("never 0.0.0.0", ""))
 
     def test_runtime_needs_the_api_address_and_secret_and_a_session_secret(self):
         base = {
@@ -61,6 +141,29 @@ class DeploymentTests(unittest.TestCase):
             self.assertRaisesRegex(RuntimeError, "session secret"),
         ):
             application()
+
+
+class OfficeHostWriteTests(DriveAppCase):
+    def test_a_write_from_the_office_authority_with_a_matching_origin_is_accepted(self):
+        self.app = create_app(self.api.client(), self.outbox, retry_interval=0, allowed_host=OFFICE)
+        self.web = self.app.test_client()
+        base = f"http://{OFFICE}:5000"
+        page = self.web.get("/new", base_url=base)
+        self.assertEqual(page.status_code, 200)
+        form = dict(
+            re.findall(
+                r'<input type="hidden" name="(csrf|key)" value="([^"]*)"',
+                page.get_data(as_text=True),
+            )
+        )
+        response = self.web.post(
+            "/new", base_url=base, headers={"Origin": base}, data={**form, "label": "Synthetic"}
+        )
+        self.assertEqual(response.status_code, 303)
+        response = self.web.post(
+            "/new", base_url=base, headers={"Origin": "http://evil.example"}, data=form
+        )
+        self.assertEqual(response.status_code, 403)
 
 
 class NoLocalDatabaseTests(DriveAppCase):

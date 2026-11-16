@@ -18,6 +18,7 @@ import urllib.request
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+OFFICE = "192.0.2.10"  # documentation range: the stand-in office-network address
 
 
 def command(*args: str, source: str | None = None, env=None) -> str:
@@ -42,8 +43,14 @@ def smoke(image: str) -> None:
         DRIVES_SESSION_SECRET=secrets.token_hex(32),
         T6_API_URL="http://127.0.0.1:9",  # nothing listens: the app must say Unavailable, not fail
         T6_API_SECRET=api_secret,
+        DRIVES_ALLOWED_HOST=OFFICE,
     )
+    env.pop("DRIVES_BIND", None)
     compose = ("docker", "compose", "-p", project)
+
+    def bind_env(bind: str) -> dict[str, str]:
+        return {"DRIVES_BIND": bind} if bind else {}
+
     volume = project + "_drives_data"
 
     def dc(*args):
@@ -87,6 +94,21 @@ def smoke(image: str) -> None:
         except urllib.error.HTTPError as error:
             assert error.code == 503
             assert api_secret not in error.read().decode()
+
+        def status(host: str) -> int:
+            request = urllib.request.Request(url + "/health", headers={"Host": host})
+            try:
+                with urllib.request.urlopen(request, timeout=2) as response:
+                    return response.status
+            except urllib.error.HTTPError as error:
+                return error.code
+
+        assert status(OFFICE) == 204 and status("192.0.2.11") == 400
+        # The publish address comes from DRIVES_BIND; unset, compose keeps loopback.
+        for bind, host_ip in (("", "127.0.0.1"), (OFFICE, OFFICE)):
+            config = command(*compose, "config", "--format", "json", env={**env, **bind_env(bind)})
+            assert json.loads(config)["services"]["app"]["ports"][0]["host_ip"] == host_ip
+        print("PASS DRIVES_BIND reaches the published binding; the configured host is answered")
         print("PASS health 204 and a read says Unavailable (503) with the API unreachable")
         for path in ("/import", "/refresh-projects", "/restore", "/deploy"):
             try:

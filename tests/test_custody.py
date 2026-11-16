@@ -1,252 +1,112 @@
-"""Synthetic custody acceptance through HTTP and durable SQLite only."""
+"""Custody screen: events are appended through the API as the custodian the API authenticates."""
 
-import re
-import tempfile
 import unittest
-from pathlib import Path
 
-from test_inventory import edit_data, token
-
-from app import create_app
+from support import DriveAppCase
 
 
-class CustodyTest(unittest.TestCase):
-    def test_structured_references_free_text_unknowns_and_escaping_survive_restart(self):
-        with tempfile.TemporaryDirectory() as directory:
-            path = str(Path(directory) / "db")
-            app = create_app(path, custody_actor_policy="self-declared-synthetic")
-            client = app.test_client()
-            location = client.post(
-                "/new", data={"csrf": token(client), "description": "synthetic references"}
-            ).headers["Location"]
-            for kind in ("received", "released", "returned"):
-                self.assertEqual(
-                    client.post(
-                        location + "/custody",
-                        data={
-                            "csrf": token(client),
-                            "kind": kind,
-                            "recipient": "<script>synthetic recipient</script>",
-                            "actor": "<script>synthetic actor</script>",
-                            "project_page_id": "synthetic-project-page",
-                            "party_kind": "contact",
-                            "party_page_id": "synthetic-contact-page",
-                            "reason": "<script>synthetic reason</script>",
-                        },
-                    ).status_code,
-                    303,
-                )
-            restarted = create_app(path).test_client()
-            page = restarted.get(location).text
-            for value in (
-                "synthetic-project-page",
-                "synthetic-contact-page",
-                "Unknown date",
-                "not authenticated",
-                "&lt;script&gt;synthetic recipient",
-                "&lt;script&gt;synthetic actor",
-                "&lt;script&gt;synthetic reason",
-            ):
-                self.assertIn(value, page)
-            self.assertNotIn("<script>", page)
-            self.assertNotIn("Existing studio reference", page)
+class CustodyTests(DriveAppCase):
+    def setUp(self):
+        super().setUp()
+        self.one, self.two = self.api.project("Synthetic one"), self.api.project("Synthetic two")
+        self.drive = self.api.add_drive(label="Synthetic A")
+        self.url = f"/drive/{self.drive}/custody"
+
+    def events(self):
+        return self.api.drive(self.drive)["events"]
+
+    def record(self, kind, **data):
+        return self.submit(self.url, **{"kind": kind, "project": self.one, **data})
+
+    def test_the_form_has_the_three_kinds_a_project_choice_and_no_actor_or_correction_input(self):
+        html = self.text(self.url)
+        for kind in ("received", "returned", "retired"):
+            self.assertIn(f"<option>{kind}</option>", html)
+        self.assertIn(f'<option value="{self.one}">Synthetic one', html)
+        for gone in ("actor", "correction_of", "recipient", "project_text", "Self-declared"):
+            self.assertNotIn(gone, html)
+
+    def test_receive_return_and_retire_append_events_and_status_follows_the_log(self):
+        for kind, status in (
+            ("received", "in custody"),
+            ("returned", "in custody"),
+            ("retired", "retired"),
+            ("received", "in custody"),
+        ):
+            data = (
+                {"on": "2026-11-02", "reason": "dead"}
+                if kind == "retired"
+                else {"on": "2026-11-02"}
+            )
+            response = self.record(kind, **data)
             self.assertEqual(
-                client.post(
-                    location + "/custody", data={"csrf": token(client), "kind": "received"}
-                ).status_code,
-                303,
+                (response.status_code, response.headers["Location"]),
+                (303, "/drive/" + self.drive),
+                kind,
             )
-            page = client.get(location).text
-            self.assertIn("Unknown recipient", page)
-            self.assertIn("Project: Unknown (unresolved)", page)
-            self.assertIn("Unknown actor", page)
-            self.assertEqual(
-                client.post(
-                    location + "/edit",
-                    data=edit_data(
-                        client, location, capacity_tb="invalid", description="must not commit"
-                    ),
-                ).status_code,
-                400,
-            )
-            self.assertEqual(page, client.get(location).text)
-            self.assertEqual(
-                client.post(location + "/custody/1/edit", data={"csrf": token(client)}).status_code,
-                404,
-            )
-            self.assertEqual(
-                client.delete(location + "/custody", data={"csrf": token(client)}).status_code, 405
-            )
-            self.assertEqual(page, client.get(location).text)
+            self.assertIn("Custody status: " + status, self.text("/drive/" + self.drive))
+        self.assertEqual(
+            [e["kind"] for e in self.events()], ["received", "returned", "retired", "received"]
+        )
+        self.assertEqual(self.events()[2]["reason"], "dead")
+        self.assertEqual(self.events()[0]["project"]["page_id"], self.one)
 
-    def test_concurrent_appends_are_durable_and_cross_drive_correction_is_rejected(self):
-        from concurrent.futures import ThreadPoolExecutor
+    def test_history_lists_every_event_in_append_order_with_project_date_and_reason(self):
+        self.record("received", on="2026-11-02")
+        self.submit(self.url, kind="retired", project=self.two, reason="lost in transit")
+        html = self.text("/drive/" + self.drive)
+        first, second = html.index("Event 1: received"), html.index("Event 2: retired")
+        self.assertLess(first, second)
+        self.assertIn("Business date: 2026-11-02", html)
+        self.assertIn("Synthetic two", html[second:])
+        self.assertIn("Reason: lost in transit", html)
+        self.assertNotIn("Append correction", html)
 
-        with tempfile.TemporaryDirectory() as directory:
-            path = str(Path(directory) / "db")
-            app = create_app(path)
-            client = app.test_client()
-            locations = [
-                client.post(
-                    "/new", data={"csrf": token(client), "description": f"synthetic {n}"}
-                ).headers["Location"]
-                for n in range(2)
-            ]
+    def test_the_actor_is_the_custodian_the_api_authenticates_whatever_the_form_says(self):
+        self.record("received", actor="Someone Else")
+        [event] = self.events()
+        self.assertEqual(event["logged_by"]["page_id"], self.api.custodian)
+        self.assertNotIn("Someone Else", self.text("/drive/" + self.drive))
 
-            def submit(n):
-                writer = app.test_client()
-                return writer.post(
-                    locations[0] + "/custody",
-                    data={"csrf": token(writer), "kind": "received", "reason": f"synthetic {n}"},
-                ).status_code
+    def test_a_party_is_recorded_with_its_kind(self):
+        self.record("returned", party_kind="studio", party="Invented Studio")
+        [event] = self.events()
+        self.assertEqual(
+            (event["party"]["kind"], event["party"]["ref"]["text"]), ("studio", "Invented Studio")
+        )
+        self.assertIn("studio: Invented Studio", self.text("/drive/" + self.drive))
 
-            with ThreadPoolExecutor(max_workers=2) as pool:
-                self.assertEqual(list(pool.map(submit, range(2))), [303, 303])
-            page = create_app(path).test_client().get(locations[0]).text
-            ids = re.findall(r'data-event-id="(\d+)"', page)
-            self.assertEqual(len(ids), 2)
-            self.assertIn("synthetic 0", page)
-            self.assertIn("synthetic 1", page)
-            before = client.get(locations[1]).data
-            with self.assertNoLogs(app.logger):
-                response = client.post(
-                    locations[1] + "/custody",
-                    data={"csrf": token(client), "kind": "returned", "correction_of": ids[0]},
-                )
-            self.assertEqual(response.status_code, 400)
-            self.assertEqual(before, client.get(locations[1]).data)
+    def test_refusals_are_shown_with_their_reason_and_append_nothing(self):
+        for kind, data, reason in (
+            ("retired", {}, "needs a reason"),
+            ("received", {"on": "13/13/2026"}, "YYYY-MM-DD"),
+            ("received", {"party": "Invented Studio"}, "party_kind"),
+            ("received", {"project": "t6p_" + "0" * 24}, "Project"),
+        ):
+            response = self.record(kind, **data)
+            self.assertEqual(response.status_code, 400, data)
+            self.assertIn(reason, response.get_data(as_text=True), data)
+        self.assertEqual(self.events(), [])
 
-            # Assignment forms introduce per-session CSRF tokens on the detail page.
-            def stable_detail(html):
-                return re.sub(r'name="csrf" value="[^"]+"', 'name="csrf"', html)
+    def test_an_unknown_kind_or_drive_is_not_accepted(self):
+        self.assertEqual(self.record("released").status_code, 400)
+        self.assertEqual(self.record("vanished").status_code, 400)
+        missing = self.submit(
+            "/drive/t6d_" + "0" * 32 + "/custody", form=self.url, kind="received", project=self.one
+        )
+        self.assertEqual(missing.status_code, 404)
+        self.assertEqual(self.events(), [])
 
-            self.assertEqual(
-                stable_detail(page),
-                stable_detail(create_app(path).test_client().get(locations[0]).text),
-            )
+    def test_a_double_submit_of_one_form_is_one_event(self):
+        data = {**self.fields(self.url), "kind": "received", "project": self.one}
+        self.assertEqual(self.web.post(self.url, data=data).status_code, 303)
+        self.assertEqual(self.web.post(self.url, data=data).status_code, 303)
+        self.assertEqual(len(self.events()), 1)
 
-    def test_uncertain_drive_all_kinds_correction_fact_edit_and_restart(self):
-        with tempfile.TemporaryDirectory() as directory:
-            path = str(Path(directory) / "db")
-            client = create_app(path, custody_actor_policy="self-declared-synthetic").test_client()
-            location = client.post(
-                "/new",
-                data={
-                    "csrf": token(client),
-                    "description": "synthetic uncertain",
-                    "needs_review": "on",
-                },
-            ).headers["Location"]
-            self.assertIn("Custody status: unknown", client.get(location).text)
-            for kind, status in (
-                ("received", "in custody"),
-                ("released", "released"),
-                ("returned", "in custody"),
-                ("retired", "retired"),
-            ):
-                response = client.post(
-                    location + "/custody",
-                    data={
-                        "csrf": token(client),
-                        "kind": kind,
-                        "on": "2025-05-06",
-                        "recipient": "synthetic recipient",
-                        "project_text": "synthetic unresolved",
-                        "actor": "synthetic operator",
-                        "reason": "synthetic reason",
-                    },
-                )
-                self.assertEqual(response.status_code, 303)
-                self.assertIn("Custody status: " + status, client.get(location).text)
-                self.assertIn(location, client.get("/", query_string={"status": status}).text)
-            before = client.get(location).text
-            ids = re.findall(r'data-event-id="(\d+)"', before)
-            self.assertEqual(len(ids), 4)
-            response = client.post(
-                location + "/custody",
-                data={
-                    "csrf": token(client),
-                    "kind": "received",
-                    "on": "2000-01-01",
-                    "correction_of": ids[-1],
-                    "reason": "synthetic correction",
-                },
-            )
-            self.assertEqual(response.status_code, 303)
-            page = client.get(location).text
-            self.assertIn("Custody status: in custody", page)
-            self.assertIn("Correction of event " + ids[-1], page)
-            match = re.search(r'<section id="custody-history">.*?</section>', page, re.DOTALL)
-            assert match is not None
-            history = match.group()
-            self.assertIn("self-declared", history)
-            self.assertIn("Unknown actor", history)
-            self.assertIn("Unknown date", client.get(location + "/custody").text)
-            self.assertEqual(
-                client.post(
-                    location + "/edit",
-                    data=edit_data(client, location, description="synthetic corrected facts"),
-                ).status_code,
-                303,
-            )
-            restarted = create_app(path).test_client().get(location).text
-            self.assertIn(history, restarted)
-            self.assertIn("Custody status: in custody", restarted)
-            self.assertNotIn(location, client.get("/?status=retired").text)
+    def test_text_from_the_api_is_escaped_in_history(self):
+        self.record("received", party_kind="contact", party="<img src=x>")
+        self.assertNotIn("<img src=x>", self.text("/drive/" + self.drive))
 
-    def test_rejected_writes_leave_all_facts_history_and_status_unchanged(self):
-        with tempfile.TemporaryDirectory() as directory:
-            client = create_app(str(Path(directory) / "db")).test_client()
-            location = client.post(
-                "/new",
-                data={
-                    "csrf": token(client),
-                    "description": "synthetic retained",
-                    "needs_review": "on",
-                },
-            ).headers["Location"]
-            self.assertEqual(
-                client.post(
-                    location + "/custody", data={"csrf": token(client), "kind": "released"}
-                ).status_code,
-                303,
-            )
-            before = client.get(location).data
-            for fields in (
-                {"kind": "retired"},
-                {"kind": "retired", "reason": "   "},
-                {"kind": "received", "correction_of": "not-an-id"},
-                {"kind": "invented"},
-                {"kind": "received", "on": "private-invalid-date"},
-                {"kind": "received", "correction_of": "999"},
-                {"kind": "received", "actor": "unapproved actor"},
-                {"kind": "released", "party_page_id": "synthetic-party"},
-                {"kind": "released", "party_kind": "invented", "party_page_id": "synthetic-party"},
-                {"kind": "released", "project_text": "text", "project_page_id": "page"},
-            ):
-                response = client.post(
-                    location + "/custody", data={"csrf": token(client), **fields}
-                )
-                self.assertEqual(response.status_code, 400)
-                self.assertNotIn("private-invalid-date", response.text)
-                self.assertEqual(before, client.get(location).data)
-            self.assertEqual(
-                client.post(
-                    "/drive/missing/custody", data={"csrf": token(client), "kind": "received"}
-                ).status_code,
-                404,
-            )
-            self.assertEqual(
-                client.post(location + "/custody", data={"kind": "received"}).status_code, 403
-            )
-            self.assertEqual(
-                client.post(
-                    location + "/custody",
-                    data={"csrf": token(client), "kind": "received"},
-                    headers={"Origin": "http://evil.test"},
-                ).status_code,
-                403,
-            )
-            self.assertEqual(before, client.get(location).data)
-            self.assertEqual(client.get(location + "/custody?kind=received").status_code, 200)
-            self.assertEqual(before, client.get(location).data)
+
+if __name__ == "__main__":
+    unittest.main()

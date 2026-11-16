@@ -3,11 +3,9 @@
 !Dockerfile
 !requirements.lock
 !app.py
-!assignments.py
+!gateway.py
+!forms.py
+!outbox.py
 !custody.py
 !shipments.py
-!import_store.py
-!imports.py
-!imported_shipments.py
 !runtime.py
-!backups.py

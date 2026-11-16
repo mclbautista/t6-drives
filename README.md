@@ -10,6 +10,21 @@ T6_API_URL=http://127.0.0.1:8000 T6_API_SECRET=... DRIVES_OUTBOX=/tmp/outbox.jso
 
 Open http://127.0.0.1:5000. The development server binds loopback only. See [deployment](docs/deployment.md) for the settings, the container and what happens when the API is down.
 
+## Office network
+
+By default the app is reachable from its own host only. Two optional settings open it to the office network (decided in #17):
+
+| Name | Meaning |
+| --- | --- |
+| `DRIVES_BIND` | Host address compose publishes on (default `127.0.0.1`). Set it to the office-network address of the host, never `0.0.0.0`. |
+| `DRIVES_ALLOWED_HOST` | The one host name or IP address, besides `localhost` and `127.0.0.1`, that the app accepts in the `Host` header: no port, scheme, list or wildcard. Empty by default; a malformed value stops start-up. |
+
+Decision (owner, 2026-11-16, for gates G1 to G3): the app runs on the studio server next to the t6 API and is reachable from the office network only. Everyone who can open it writes as the drive custodian, through the custodian's own t6 API secret; there is no per-user login.
+
+The app speaks plain HTTP, so it must never be published beyond the office network.
+
+Check: open it from another office machine, which works; a request whose `Host` is any other name is answered 400. See [deployment](docs/deployment.md#office-network).
+
 ## Screens
 
 | Screen | t6 verb |

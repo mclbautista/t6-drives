@@ -44,6 +44,6 @@ uv pip install --python .venv/bin/python -r requirements-dev.lock
 
 The tests serve t6's real `VerbAPI` on a temporary database (`tests/support.py`); nothing is faked. The API side needs `httpx`, `PyYAML` and `openpyxl`, which are development dependencies only. If Chromium is installed elsewhere, set `DRIVES_CHROMIUM` to its path.
 
-t6 is pinned to t6-core commit `f4d3e58549397053fbea3d4edbbbb10c40c51de0` (main, before the 0.6.2 tag); `pyproject.toml`, `uv.lock` and `requirements.lock` name it.
+t6 is pinned to release tag `v0.6.2`; `requirements.lock` pins the exact commit.
 
 A refusal for a step that cannot follow the last custody step (rule `custody`), or for an edit of a Drive that changed (`drive_changed`), is answered 409 and shown to the person; it is never queued or sent again.

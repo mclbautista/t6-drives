@@ -65,6 +65,27 @@ class InventoryTests(DriveAppCase):
         self.assertEqual(self.shown(f"?project={one}&status=released"), [])
         self.assertEqual(self.shown(f"?project={one}&review=yes&status=in+custody&q=synth"), [a])
 
+    def test_each_drive_shows_its_open_project_use_without_a_read_per_drive(self):
+        _, two, a, b, c = self.seed()
+        self.api.assign(a, two, "A2", "backup")
+        self.api.legacy_assignment(c, "SYN")
+        self.api.requests.clear()
+        html = self.text("/")
+        rows = {d: html[html.index(f'href="/drive/{d}"') :].split("</li>")[0] for d in (a, b, c)}
+        for shown in ("Synthetic one", "A1", "master", "Synthetic two", "A2", "backup"):
+            self.assertIn(shown, rows[a])
+        self.assertIn("Open Project use: none", rows[b])
+        self.assertIn("Unresolved: SYN", rows[c])
+        self.assertNotIn("/v1/drive/get", self.api.requests)
+        self.assertEqual(self.api.requests.count("/v1/drive/list"), 1)
+
+    def test_an_ended_assignment_is_not_open_project_use(self):
+        _, _, a, *_ = self.seed()
+        from t6.verbs import DriveUnassignInput
+
+        self.api.write("drive_unassign", DriveUnassignInput, drive=a, assignment=1)
+        self.assertIn("Open Project use: none", self.text("/"))
+
     def test_project_filter_offers_the_registered_projects_from_the_api(self):
         one, two, *_ = self.seed()
         html = self.text("/")

@@ -1,7 +1,6 @@
 """The one place this app talks to the t6 API: typed reads, and writes that wait in the outbox when the API is down."""
 
 import logging
-import re
 import time
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -66,8 +65,7 @@ def call(client: Client, method: str, inputs: BaseModel) -> Outcome | Unavailabl
     try:
         return getattr(client, method)(inputs)
     except APIError as error:
-        found = re.search(r"HTTP (\d{3})", str(error))
-        status = int(found.group(1)) if found else 0
+        status = error.status or 0
         log.warning("t6 API answered HTTP %s", status)
         if status >= 500:
             return Unavailable(f"HTTP {status}")
@@ -79,6 +77,10 @@ def call(client: Client, method: str, inputs: BaseModel) -> Outcome | Unavailabl
 
 def describe(outcome: Outcome) -> str:
     """What the custodian reads when a write is not done."""
+    if isinstance(outcome, Refused) and outcome.rule == "custody":
+        return (
+            outcome.reason + ". Nothing was recorded; check the custody history on the Drive page."
+        )
     if isinstance(outcome, (Refused, NeedsPerson)):
         return outcome.reason
     if isinstance(outcome, Ambiguous):

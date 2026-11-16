@@ -14,15 +14,15 @@ Open http://127.0.0.1:5000. The development server binds loopback only. See [dep
 
 | Screen | t6 verb |
 | --- | --- |
-| `/` inventory and filters | `drive list` |
+| `/` inventory and filters, with each Drive's open Project use | `drive list` |
 | `/new` | `drive add` |
 | `/drive/<id>` | `drive get` |
-| `/drive/<id>/edit` | `drive edit` (label, serials, form factor, review flag and note) |
+| `/drive/<id>/edit` | `drive edit` (every fact; the form sends the Drive's `version` as `expected_version`, and a Drive that changed meanwhile is shown again) |
 | `/drive/<id>/promote` | `drive promote-serial` |
-| Assignments on the Drive page | `drive assign`, `drive unassign` |
+| Assignments on the Drive page | `drive assign` (with remarks), `drive unassign` (by Assignment number, so one whose Project is text only can be ended) |
 | `/drive/<id>/custody` | `drive receive`, `drive return`, `drive retire` |
-| `/shipments/new` | `drive release` |
-| `/shipments`, `/shipments/<id>` | `drive shipments`, `drive shipment` |
+| `/shipments/new` | `drive release` (with a reason and a free-text recipient) |
+| `/shipments`, `/shipments/<id>` | `drive shipments`, `drive shipment` (the manifest shows the facts stored at release) |
 | `/exceptions` | `drive exceptions` |
 | `/outbox` | writes waiting for the API, or refused by it |
 | `/health` | none (process readiness) |
@@ -44,4 +44,6 @@ uv pip install --python .venv/bin/python -r requirements-dev.lock
 
 The tests serve t6's real `VerbAPI` on a temporary database (`tests/support.py`); nothing is faked. The API side needs `httpx`, `PyYAML` and `openpyxl`, which are development dependencies only. If Chromium is installed elsewhere, set `DRIVES_CHROMIUM` to its path.
 
-t6 is pinned to release tag `v0.6.1`; `requirements.lock` pins the exact commit.
+t6 is pinned to t6-core commit `f4d3e58549397053fbea3d4edbbbb10c40c51de0` (main, before the 0.6.2 tag); `pyproject.toml`, `uv.lock` and `requirements.lock` name it.
+
+A refusal for a step that cannot follow the last custody step (rule `custody`), or for an edit of a Drive that changed (`drive_changed`), is answered 409 and shown to the person; it is never queued or sent again.

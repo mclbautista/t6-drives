@@ -39,6 +39,7 @@ class SyntheticAPI:
 
     def __init__(self, directory: str) -> None:
         self.mode = "up"
+        self.requests: list[str] = []
         self.notion = FakeNotion()
         self.notion.add_snapshot_data_source("projects", "projects")
         self.registry = SqliteProjectRegistry(directory + "/registry")
@@ -81,6 +82,7 @@ class SyntheticAPI:
         return done.result
 
     def handle(self, request: Request) -> Response:
+        self.requests.append(request.path)
         if self.mode == "down":
             return Response(503, {"error": "unavailable"})
         response = self.api(request)
@@ -174,11 +176,42 @@ class SyntheticAPI:
 
         SqliteDriveStore(self.registry).record_exceptions([ReviewItem(**fields)])
 
-    def assign(self, drive: str, project: str, label: str, role: str) -> None:
+    def assign(self, drive: str, project: str, label: str, role: str, **values: Any) -> None:
         from t6.verbs import DriveAssignInput
 
         self.write(
-            "drive_assign", DriveAssignInput, drive=drive, project=project, label=label, role=role
+            "drive_assign",
+            DriveAssignInput,
+            drive=drive,
+            project=project,
+            label=label,
+            role=role,
+            **values,
+        )
+
+    def edit_drive(self, drive: str, **facts: Any) -> None:
+        from t6.verbs import DriveEditInput
+
+        self.write("drive_edit", DriveEditInput, drive=drive, **facts)
+
+    def legacy_shipment(self, drive: str, project: str, shipment: str) -> None:
+        """A release recorded as the workbook import does it: with a shipment, and no facts kept for it."""
+        from datetime import date
+
+        from t6.drives import CustodyEvent, CustodyKind, Party, PartyKind, Ref
+        from t6.drives.sqlite import SqliteDriveStore
+
+        SqliteDriveStore(self.registry).append_event(
+            drive,
+            CustodyEvent(
+                kind=CustodyKind.RELEASED,
+                on=date(2024, 1, 1),
+                party=Party(PartyKind.STUDIO, Ref(text="Invented Studio")),
+                project=Ref(page_id=project),
+                logged_by=Ref(page_id=self.custodian),
+                reason=None,
+                shipment_id=shipment,
+            ),
         )
 
 
@@ -211,7 +244,11 @@ class DriveAppCase(unittest.TestCase):
     def fields(self, url: str) -> dict[str, str]:
         """The hidden CSRF and idempotency key fields a rendered form carries."""
         page = self.web.get(url).get_data(as_text=True)
-        found = dict(re.findall(r'<input type="hidden" name="(csrf|key)" value="([^"]*)"', page))
+        found = dict(
+            re.findall(
+                r'<input type="hidden" name="(csrf|key|expected_version)" value="([^"]*)"', page
+            )
+        )
         assert "csrf" in found, "CSRF form token missing"
         return found
 

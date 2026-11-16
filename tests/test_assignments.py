@@ -102,14 +102,25 @@ class AssignmentTests(DriveAppCase):
         self.assertEqual(self.web.post(self.page + "/assignments", data=data).status_code, 303)
         self.assertEqual(len(self.assignments()), 1)
 
-    def test_an_assignment_the_api_returns_with_project_text_only_is_shown_and_cannot_be_ended_here(
-        self,
-    ):
+    def test_an_assignment_with_project_text_only_is_shown_and_can_be_ended_by_its_number(self):
         self.api.legacy_assignment(self.drive, "SYN")
         html = self.text(self.page)
         self.assertIn("Unresolved: SYN", html)
         self.assertIn("Label: legacy", html)
-        self.assertNotIn("End Assignment", html)
+        self.assertEqual(html.count("End Assignment</button>"), 1)
+        self.assertNotIn('name="project" value=', html)
+        response = self.submit(f"{self.page}/assignments/1/end", form=self.page, end="2026-11-11")
+        self.assertEqual((response.status_code, response.headers["Location"]), (303, self.page))
+        [held] = self.assignments()
+        self.assertEqual((held["end"], held["open"]), ("2026-11-11", False))
+        self.assertNotIn("End Assignment", self.text(self.page))
+
+    def test_a_remark_on_an_assignment_is_sent_and_shown(self):
+        self.assertIn('name="remarks"', self.text(self.page))
+        self.add(remarks="spare for the edit suite")
+        [held] = self.assignments()
+        self.assertEqual(held["remarks"], "spare for the edit suite")
+        self.assertIn("spare for the edit suite", self.text(self.page))
 
     def test_inventory_has_no_unresolved_project_text_filter(self):
         self.assertNotIn("project_text", self.text("/"))

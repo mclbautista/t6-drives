@@ -48,7 +48,7 @@ rpds-py==2026.9.1
     # via
     #   jsonschema
     #   referencing
-t6 @ git+https://github.com/mclbautista/t6-core.git@ddd72fcf8377d55d4e7afd3852e00d86cc166491
+t6 @ git+https://github.com/mclbautista/t6-core.git@f4d3e58549397053fbea3d4edbbbb10c40c51de0
     # via t6-drives
 typing-extensions==4.16.0
     # via

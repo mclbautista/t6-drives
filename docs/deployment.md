@@ -44,7 +44,7 @@ curl --fail -i http://127.0.0.1:5000/health
 
 - Every read screen answers 503 "Unavailable".
 - A write that cannot reach the API (no connection, timeout, or a 5xx answer) is queued in the outbox file and the page says so. It is sent again with the same idempotency key, at the start of a request at most every 5 seconds, so it is recorded once.
-- A queued write the API later refuses shows as Failed, with the reason, on `/outbox`. The custodian dismisses it there.
+- A queued write the API later refuses shows as Failed, with the reason, on `/outbox`. The custodian dismisses it there. A custody step that cannot follow the last one, or an edit of a Drive that changed since its form was opened, is refused the same way and is never sent again.
 - The outbox is the only file in `/data`. Keep the volume while writes are queued.
 
 The workbook import runs with the `t6` command against the t6 database, not here.

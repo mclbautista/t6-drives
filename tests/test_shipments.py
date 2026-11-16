@@ -2,6 +2,7 @@
 
 import re
 import unittest
+from pathlib import Path
 
 from support import DriveAppCase
 
@@ -35,8 +36,10 @@ class ShipmentTests(DriveAppCase):
         for drive in (self.a, self.b):
             self.assertIn(f'name="drive_id" value="{drive}"', html)
         self.assertIn(f'<option value="{self.one}">Synthetic one', html)
-        for gone in ("actor", "Self-declared", "project_text", "recipient"):
+        for gone in ("actor", "Self-declared", "project_text"):
             self.assertNotIn(gone, html)
+        for asked in ("reason", "recipient"):
+            self.assertIn(f'name="{asked}"', html)
 
     def test_one_release_is_one_shipment_with_one_released_event_per_drive_and_duplicates_collapse(
         self,
@@ -73,6 +76,36 @@ class ShipmentTests(DriveAppCase):
         self.assertEqual(len(re.findall(r"<tr data-drive-id=", html)), 2)
         self.assertIn(f'data-drive-id="{self.a}"', html)
 
+    def test_the_reason_and_the_free_text_recipient_are_sent_and_shown_on_the_manifest(self):
+        location = self.release(
+            [self.a], reason="loan for the edit", recipient="Invented Courier"
+        ).headers["Location"]
+        [event] = self.api.drive(self.a)["events"]
+        self.assertEqual(event["reason"], "loan for the edit")
+        html = self.text(location)
+        self.assertIn("Taken by: Invented Courier", html)
+        self.assertIn("Reason: loan for the edit", html)
+        plain = self.text(self.release([self.b]).headers["Location"])
+        self.assertNotIn("Taken by", plain)
+        self.assertNotIn("Reason:", plain)
+
+    def test_the_manifest_shows_the_facts_stored_at_release_not_the_current_ones(self):
+        location = self.release([self.a]).headers["Location"]
+        self.api.edit_drive(self.a, label="Renamed later", description="red", capacity_tb="8")
+        html = self.text(location)
+        for shown in ("Synthetic A", "blue", "4.0", "as they were at release"):
+            self.assertIn(shown, html)
+        for current in ("Renamed later", "red", "8.0"):
+            self.assertNotIn(current, html)
+        self.assertEqual(self.api.drive(self.a)["drive"]["label"], "Renamed later")
+
+    def test_a_shipment_without_stored_facts_shows_current_facts_and_says_so(self):
+        self.api.legacy_shipment(self.a, self.one, "shipment-" + "1" * 32)
+        html = self.text("/shipments/shipment-" + "1" * 32)
+        self.assertIn("Synthetic A", html)
+        self.assertIn("not kept for this shipment", html)
+        self.assertNotIn("as they were at release", html)
+
     def test_the_shipment_list_shows_each_shipment_with_its_party_date_project_and_count(self):
         self.assertIn("<ul></ul>", self.text("/shipments"))
         first = self.release([self.a]).headers["Location"]
@@ -100,6 +133,19 @@ class ShipmentTests(DriveAppCase):
             self.assertIn('<form method="post">', response.get_data(as_text=True))
         for drive in (self.a, self.b):
             self.assertEqual(self.api.drive(drive)["events"], [])
+
+    def test_releasing_a_drive_already_released_is_refused_whole_in_plain_words_and_nothing_is_queued(
+        self,
+    ):
+        self.assertEqual(self.release([self.a]).status_code, 303)
+        response = self.release([self.a, self.b])
+        html = response.get_data(as_text=True)
+        self.assertEqual(response.status_code, 409)
+        self.assertIn(f"Cannot release Drive {self.a} (released)", html)
+        self.assertIn("Nothing was recorded", html)
+        self.assertIn('<form method="post">', html)
+        self.assertEqual(self.api.drive(self.b)["events"], [])
+        self.assertFalse(Path(self.outbox).exists())
 
     def test_a_double_submit_of_one_release_form_is_one_shipment(self):
         data = {

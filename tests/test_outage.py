@@ -6,7 +6,7 @@ import unittest
 from pathlib import Path
 
 from support import SECRET, DriveAppCase
-from t6.client import Client
+from t6.client import APIError, Client
 
 from app import create_app
 
@@ -57,6 +57,41 @@ class UnavailableReadTests(DriveAppCase):
         response = web.post("/new", data={**fields, "label": "x"})
         self.assertEqual(response.status_code, 400)
         self.assertIn("did not accept", response.get_data(as_text=True))
+        self.assertFalse(Path(self.outbox).exists())
+
+
+class ErrorStatusTests(DriveAppCase):
+    """The app reads `APIError.status`, never the words of the message."""
+
+    def web_answering(self, status, message):
+        class Answering(Client):
+            def _request(self, *args, **kwargs):
+                raise APIError(message, status)
+
+        client = Answering(self.api.url, SECRET, timeout=5)
+        return create_app(client, self.outbox, retry_interval=3600).test_client()
+
+    def post_new(self, web):
+        page = web.get("/new").get_data(as_text=True)
+        fields = dict(re.findall(r'<input type="hidden" name="(csrf|key)" value="([^"]*)"', page))
+        return web.post("/new", data={**fields, "label": "x"})
+
+    def test_a_5xx_status_is_unavailable_whatever_the_message_says(self):
+        web = self.web_answering(502, "bad gateway")
+        self.assertEqual(web.get("/").status_code, 503)
+        self.assertEqual(self.post_new(web).status_code, 202)
+        self.assertEqual(len(json.loads(Path(self.outbox).read_text())["entries"]), 1)
+
+    def test_a_4xx_status_is_refused_not_queued_whatever_the_message_says(self):
+        web = self.web_answering(400, "upstream said HTTP 503")
+        response = self.post_new(web)
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("did not accept", response.get_data(as_text=True))
+        self.assertFalse(Path(self.outbox).exists())
+
+    def test_an_error_with_no_status_is_refused_not_queued(self):
+        response = self.post_new(self.web_answering(None, "no request was made"))
+        self.assertEqual(response.status_code, 400)
         self.assertFalse(Path(self.outbox).exists())
 
 
@@ -214,6 +249,45 @@ class OutboxTests(DriveAppCase):
         self.assertEqual((response.status_code, response.headers["Location"]), (303, "/outbox"))
         self.assertEqual(self.outbox_entries(), [])
         self.assertNotIn("already recorded", self.text("/outbox"))
+
+    def test_a_queued_step_that_cannot_follow_is_refused_later_and_not_sent_again(self):
+        project = self.api.project("Synthetic one")
+        drive = self.api.add_drive(label="Synthetic")
+        url = f"/drive/{drive}/custody"
+        opened = self.fields(url)
+        self.api.mode = "down"
+        response = self.submit(url, hidden=opened, kind="received", project=project)
+        self.assertEqual(response.status_code, 202)
+        self.api.mode = "up"
+        self.api.receive(drive, project)  # another custodian took it in meanwhile
+        self.text("/outbox")
+        [entry] = self.outbox_entries()
+        self.assertEqual(entry["state"], "failed")
+        self.assertIn("Cannot receive Drive", entry["reason"])
+        self.api.requests.clear()
+        for _ in range(2):
+            self.text("/outbox")
+        self.assertNotIn("/v1/drive/receive", self.api.requests)
+        self.assertEqual(len(self.api.drive(drive)["events"]), 1)
+
+    def test_a_queued_edit_of_a_drive_that_changed_is_refused_later_and_not_sent_again(self):
+        drive = self.api.add_drive(label="Synthetic", brand="Old Brand")
+        url = f"/drive/{drive}/edit"
+        opened = self.fields(url)
+        self.api.mode = "down"
+        response = self.submit(url, hidden=opened, label="Mine", brand="My Brand")
+        self.assertEqual(response.status_code, 202)
+        self.api.mode = "up"
+        self.api.edit_drive(drive, brand="Their Brand")
+        self.text("/outbox")
+        [entry] = self.outbox_entries()
+        self.assertEqual(entry["state"], "failed")
+        self.assertIn("changed", entry["reason"])
+        self.api.requests.clear()
+        self.text("/outbox")
+        self.assertNotIn("/v1/drive/edit", self.api.requests)
+        after = self.api.drive(drive)["drive"]
+        self.assertEqual((after["label"], after["brand"]), ("Synthetic", "Their Brand"))
 
     def test_a_queued_write_cannot_be_dismissed_and_an_unknown_one_is_not_found(self):
         self.api.stop()

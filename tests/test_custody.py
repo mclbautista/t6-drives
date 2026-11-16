@@ -1,8 +1,10 @@
 """Custody screen: events are appended through the API as the custodian the API authenticates."""
 
 import unittest
+from pathlib import Path
 
 from support import DriveAppCase
+from t6.verbs import DriveReleaseInput
 
 
 class CustodyTests(DriveAppCase):
@@ -27,11 +29,10 @@ class CustodyTests(DriveAppCase):
             self.assertNotIn(gone, html)
 
     def test_receive_return_and_retire_append_events_and_status_follows_the_log(self):
+        self.api.write("drive_release", DriveReleaseInput, **self.release())
         for kind, status in (
-            ("received", "in custody"),
             ("returned", "in custody"),
             ("retired", "retired"),
-            ("received", "in custody"),
         ):
             data = (
                 {"on": "2026-11-02", "reason": "dead"}
@@ -45,11 +46,41 @@ class CustodyTests(DriveAppCase):
                 kind,
             )
             self.assertIn("Custody status: " + status, self.text("/drive/" + self.drive))
-        self.assertEqual(
-            [e["kind"] for e in self.events()], ["received", "returned", "retired", "received"]
-        )
+        self.assertEqual([e["kind"] for e in self.events()], ["released", "returned", "retired"])
         self.assertEqual(self.events()[2]["reason"], "dead")
-        self.assertEqual(self.events()[0]["project"]["page_id"], self.one)
+        self.assertEqual(self.events()[0]["project"]["page_id"], self.two)
+
+    def release(self):
+        return {
+            "drives": [self.drive],
+            "project": self.two,
+            "party": "Invented Studio",
+            "party_kind": "studio",
+        }
+
+    def test_a_step_that_cannot_follow_the_last_one_is_shown_in_plain_words_and_nothing_is_queued(
+        self,
+    ):
+        self.record("received")
+        response = self.record("received")
+        html = response.get_data(as_text=True)
+        self.assertEqual(response.status_code, 409)
+        self.assertIn(f"Cannot receive Drive {self.drive} (in custody)", html)
+        self.assertIn("Nothing was recorded", html)
+        self.assertEqual([e["kind"] for e in self.events()], ["received"])
+        self.assertFalse(Path(self.outbox).exists())
+
+    def test_every_kind_of_step_that_cannot_follow_is_refused(self):
+        for kind, data, status in (
+            ("returned", {}, 409),
+            ("received", {}, 303),
+            ("retired", {"reason": "dead"}, 303),
+            ("retired", {"reason": "again"}, 409),
+            ("received", {}, 409),
+            ("returned", {}, 409),
+        ):
+            self.assertEqual(self.record(kind, **data).status_code, status, kind)
+        self.assertEqual([e["kind"] for e in self.events()], ["received", "retired"])
 
     def test_history_lists_every_event_in_append_order_with_project_date_and_reason(self):
         self.record("received", on="2026-11-02")
@@ -69,8 +100,9 @@ class CustodyTests(DriveAppCase):
         self.assertNotIn("Someone Else", self.text("/drive/" + self.drive))
 
     def test_a_party_is_recorded_with_its_kind(self):
+        self.api.write("drive_release", DriveReleaseInput, **self.release())
         self.record("returned", party_kind="studio", party="Invented Studio")
-        [event] = self.events()
+        event = self.events()[-1]
         self.assertEqual(
             (event["party"]["kind"], event["party"]["ref"]["text"]), ("studio", "Invented Studio")
         )

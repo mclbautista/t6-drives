@@ -167,21 +167,135 @@ class DriveDetailTests(DriveAppCase):
         self.assertIn("&lt;b&gt;bold", html)
 
 
+FACTS = (
+    "label",
+    "serial",
+    "suspected_serial",
+    "review_note",
+    "form_factor",
+    "description",
+    "brand",
+    "model",
+    "capacity_tb",
+    "format",
+    "owner_studio_id",
+    "purchase_date",
+    "warranty",
+    "remarks",
+    "needs_review",
+)
+
+
 class EditDriveTests(DriveAppCase):
     def drive(self, **facts):
         return self.api.add_drive(**{"label": "Synthetic one", **facts})
 
-    def test_edit_form_is_filled_from_the_drive_and_carries_only_what_the_api_can_change(self):
+    def test_edit_form_is_filled_from_the_drive_and_carries_every_fact(self):
         drive = self.drive(
-            serial="SYN-1", needs_review=True, review_note="n", form_factor="portable"
+            serial="SYN-1",
+            needs_review=True,
+            review_note="n",
+            form_factor="portable",
+            brand="Invented Brand",
+            capacity_tb=2.5,
+            ownership_known=True,
+            warranty="2 years",
         )
         html = self.text(f"/drive/{drive}/edit")
-        for name in ("label", "serial", "suspected_serial", "review_note"):
+        for name in (*FACTS, "ownership"):
             self.assertIn(f'name="{name}"', html)
-        self.assertIn('value="Synthetic one"', html)
-        self.assertIn('value="SYN-1"', html)
+        for value in ("Synthetic one", "SYN-1", "Invented Brand", "2.5", "2 years"):
+            self.assertIn(f'value="{value}"', html)
+        self.assertIn('<option value="t6" selected>', html)
         self.assertIn("checked", html)
-        self.assertNotIn('name="brand"', html)
+        version = self.api.drive(drive)["drive"]["version"]
+        self.assertIn(f'<input type="hidden" name="expected_version" value="{version}">', html)
+
+    def test_edit_changes_every_fact_and_a_blank_clears_one(self):
+        drive = self.drive(
+            serial="SYN-1", description="old", capacity_tb=2.5, brand="Old Brand", remarks="old"
+        )
+        data: dict[str, Any] = {
+            "label": "Corrected label",
+            "serial": "SYN-2",
+            "suspected_serial": "cand",
+            "review_note": "look",
+            "form_factor": "powered desktop",
+            "description": "new",
+            "brand": "",
+            "model": "M2",
+            "capacity_tb": "",
+            "format": "APFS",
+            "ownership": "studio",
+            "owner_studio_id": "synthetic-studio-ref",
+            "purchase_date": "2025-05-06",
+            "warranty": "3 years",
+            "remarks": "",
+            "needs_review": "on",
+        }
+        response = self.submit(f"/drive/{drive}/edit", **data)
+        self.assertEqual(
+            (response.status_code, response.headers["Location"]), (303, "/drive/" + drive)
+        )
+        after = self.api.drive(drive)["drive"]
+        self.assertEqual(
+            {name: after[name] for name in (*FACTS, "ownership")},
+            {
+                **{name: data[name] or None for name in FACTS},
+                "serial": "SYN-2",
+                "suspected_serial": "CAND",
+                "needs_review": True,
+                "ownership": "studio",
+            },
+        )
+        self.assertEqual(len(self.api.drives()), 1)
+
+    def test_ownership_can_be_set_back_to_unknown_or_t6_and_a_conflict_is_refused(self):
+        drive = self.drive(ownership_known=True, owner_studio_id="synthetic-studio-ref")
+        for ownership, studio, status in (
+            ("t6", "", 303),
+            ("unknown", "", 303),
+            ("unknown", "must not invent", 400),
+            ("studio", "", 400),
+        ):
+            response = self.submit(
+                f"/drive/{drive}/edit",
+                label="Synthetic one",
+                ownership=ownership,
+                owner_studio_id=studio,
+            )
+            self.assertEqual(response.status_code, status, (ownership, studio))
+        after = self.api.drive(drive)["drive"]
+        self.assertEqual((after["ownership"], after["owner_studio_id"]), ("unknown", None))
+
+    def test_an_unreadable_capacity_is_refused_on_the_form_and_changes_nothing(self):
+        drive = self.drive(capacity_tb=2)
+        for capacity in ("nan", "-1", "big"):
+            response = self.submit(
+                f"/drive/{drive}/edit", label="Synthetic one", capacity_tb=capacity
+            )
+            self.assertEqual(response.status_code, 400, capacity)
+        self.assertEqual(self.api.drive(drive)["drive"]["capacity_tb"], 2.0)
+
+    def test_an_edit_of_a_drive_that_changed_since_the_form_was_opened_is_refused_and_the_form_reloaded(
+        self,
+    ):
+        drive = self.drive(brand="Old Brand")
+        url = f"/drive/{drive}/edit"
+        opened = self.fields(url)
+        self.api.edit_drive(drive, brand="Their Brand")
+        response = self.submit(url, hidden=opened, label="Mine", brand="My Brand")
+        html = response.get_data(as_text=True)
+        self.assertEqual(response.status_code, 409)
+        self.assertIn("The Drive changed since you opened this form", html)
+        self.assertIn('value="Their Brand"', html)  # the form is the Drive as it is now
+        self.assertNotIn("My Brand", html)
+        self.assertEqual(self.api.drive(drive)["drive"]["label"], "Synthetic one")
+        again = self.fields(url)
+        self.assertNotEqual(again["key"], opened["key"])
+        reloaded = self.submit(url, hidden=again, label="Mine", brand="Their Brand")
+        self.assertEqual(reloaded.status_code, 303)
+        self.assertEqual(self.api.drive(drive)["drive"]["label"], "Mine")
 
     def test_edit_changes_the_named_facts_and_keeps_the_id_and_history(self):
         drive = self.drive(serial="SYN-1", needs_review=True, review_note="check")

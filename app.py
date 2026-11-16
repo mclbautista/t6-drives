@@ -8,7 +8,7 @@ from typing import Any
 
 from flask import Flask, abort, redirect, render_template_string, request, session
 from t6.client import Client
-from t6.verbs import DriveExceptionsInput, DriveGetInput, DriveListInput
+from t6.verbs import DriveExceptionsInput, DriveGetInput, DriveListInput, Refused
 from t6.vocabulary import DRIVE_ROLES
 from werkzeug.exceptions import HTTPException, NotFound
 
@@ -18,7 +18,7 @@ from gateway import ApiRefused, ApiUnavailable, Gateway
 from outbox import Outbox
 from shipments import register_shipments
 
-# Everything `drive add` takes. `drive edit` takes only the first six, and `ownership` stands for two inputs.
+# Everything `drive add` and `drive edit` take; `ownership` on the form stands for two inputs.
 ADD_FIELDS = (
     "label",
     "serial",
@@ -35,7 +35,6 @@ ADD_FIELDS = (
     "warranty",
     "remarks",
 )
-EDIT_FIELDS = ADD_FIELDS[:5]
 LABELS = {
     "serial": "Accepted serial",
     "suspected_serial": "Suspected serial (uncertain)",
@@ -47,14 +46,15 @@ LABELS = {
     "review_note": "Review note",
 }
 
-INDEX = """<!doctype html><title>Inventory</title><h1>Inventory</h1><a href="/exceptions">Import exceptions</a> <a href="/shipments">Shipments</a> <a href="/shipments/new">Release shipment</a> <a href="/new">New Drive</a> <a href="/outbox">Outbox</a><form><label>Search <input name="q" value="{{ q }}"></label><label>Exact accepted serial <input name="serial"></label><label>Review <select name="review"><option value="">All</option><option value="yes">Needs review</option><option value="no">Not flagged</option></select></label><label>Project (open use) <select name="project"><option value="">All Projects</option>{% for p in projects %}<option value="{{ p.t6_id }}" {% if project == p.t6_id %}selected{% endif %}>{{ p.name }} — code: {{ p.project_code or 'unknown' }} — {{ p.t6_id }}</option>{% endfor %}</select></label><label>Status <select name="status" aria-label="Status"><option value="">All</option>{% for choice in ["unknown", "in custody", "released", "retired"] %}<option {% if status == choice %}selected{% endif %}>{{ choice }}</option>{% endfor %}</select></label><button>Find</button></form><ul>{% for d in drives %}<li><a href="/drive/{{ d.id }}">{{ d.id }}</a> {{ d.label or '' }} {{ d.description or '' }} Custody status: {{ d.status }} {% if d.serial %}Accepted: {{ d.serial }}{% endif %} {% if d.suspected_serial %}Suspected (uncertain): {{ d.suspected_serial }}{% endif %} {% if d.needs_review %}Needs review{% endif %}</li>{% endfor %}</ul>"""
+INDEX = """<!doctype html><title>Inventory</title><h1>Inventory</h1><a href="/exceptions">Import exceptions</a> <a href="/shipments">Shipments</a> <a href="/shipments/new">Release shipment</a> <a href="/new">New Drive</a> <a href="/outbox">Outbox</a><form><label>Search <input name="q" value="{{ q }}"></label><label>Exact accepted serial <input name="serial"></label><label>Review <select name="review"><option value="">All</option><option value="yes">Needs review</option><option value="no">Not flagged</option></select></label><label>Project (open use) <select name="project"><option value="">All Projects</option>{% for p in projects %}<option value="{{ p.t6_id }}" {% if project == p.t6_id %}selected{% endif %}>{{ p.name }} — code: {{ p.project_code or 'unknown' }} — {{ p.t6_id }}</option>{% endfor %}</select></label><label>Status <select name="status" aria-label="Status"><option value="">All</option>{% for choice in ["unknown", "in custody", "released", "retired"] %}<option {% if status == choice %}selected{% endif %}>{{ choice }}</option>{% endfor %}</select></label><button>Find</button></form><ul>{% for d in drives %}<li><a href="/drive/{{ d.id }}">{{ d.id }}</a> {{ d.label or '' }} {{ d.description or '' }} Custody status: {{ d.status }} {% if d.serial %}Accepted: {{ d.serial }}{% endif %} {% if d.suspected_serial %}Suspected (uncertain): {{ d.suspected_serial }}{% endif %} {% if d.needs_review %}Needs review{% endif %} Open Project use: {% for a in d.open_assignments %}{{ display(a.project) }} ({{ a.label or 'no label' }}, {{ a.role or 'unknown role' }}, from {{ a.start or 'unknown date' }}){% if not loop.last %}; {% endif %}{% else %}none{% endfor %}</li>{% endfor %}</ul>"""
 FORM = (
     """<!doctype html><title>{{ title }}</title><h1>{{ title }}</h1>
 <a href="/">Inventory</a>{% if error %}<p role="alert">{{ error }}</p>{% endif %}
 <form method="post">"""
     + HIDDEN
     + """
-{% if not editing %}<p><label for="ownership">Ownership</label> <select id="ownership" name="ownership">{% for choice, label in [("unknown", "Unknown ownership"), ("t6", "T6"), ("studio", "Studio")] %}<option value="{{ choice }}" {% if values.get("ownership", "unknown") == choice %}selected{% endif %}>{{ label }}</option>{% endfor %}</select></p>{% endif %}
+{% if editing %}<input type="hidden" name="expected_version" value="{{ version }}">{% endif %}
+<p><label for="ownership">Ownership</label> <select id="ownership" name="ownership">{% for choice, label in [("unknown", "Unknown ownership"), ("t6", "T6"), ("studio", "Studio")] %}<option value="{{ choice }}" {% if values.get("ownership", "unknown") == choice %}selected{% endif %}>{{ label }}</option>{% endfor %}</select></p>
 {% for name in fields %}<p><label>{{ labels.get(name, name|capitalize) }}
 {% if name == 'form_factor' %}<select name="form_factor"><option value="">Unknown</option>{% for choice in ['portable', 'powered desktop'] %}<option value="{{ choice }}" {% if values.get(name) == choice %}selected{% endif %}>{{ choice }}</option>{% endfor %}</select>
 {% else %}<input name="{{ name }}" value="{{ values.get(name) or '' }}">{% endif %}</label></p>{% endfor %}
@@ -66,14 +66,14 @@ DETAIL = (
     + """<button>Promote suspected serial to accepted</button></form>{% endif %}
 <section><h2>Project use / Assignment history</h2><p>Assignments record Project use, not physical custody.</p>
 <ul>{% for a in assignments %}<li data-assignment-id="{{ a.number }}">{{ display(a.project) }} — Label: {{ a.label or 'Unknown' }} — Role: {{ a.role or 'Unknown' }} — Start: {{ a.start or 'Unknown' }} — End: {{ a.end or 'Open' }} — {{ a.remarks or '' }}
-{% if a.open and a.project and a.project.page_id %}<form method="post" action="/drive/{{ d.id }}/assignments/{{ a.number }}/end">"""
+{% if a.open %}<form method="post" action="/drive/{{ d.id }}/assignments/{{ a.number }}/end">"""
     + HIDDEN
-    + """<input type="hidden" name="project" value="{{ a.project.page_id }}"><label>End date <input name="end" type="date" required></label><button>End Assignment</button></form>{% endif %}</li>{% endfor %}</ul>
+    + """<label>End date <input name="end" type="date" required></label><button>End Assignment</button></form>{% endif %}</li>{% endfor %}</ul>
 <h3>Add Assignment</h3><form method="post" action="/drive/{{ d.id }}/assignments">"""
     + HIDDEN
     + """
 <label>Project <select name="project">{% for p in projects %}<option value="{{ p.t6_id }}">{{ p.name }} — {{ p.project_code or 'unknown code' }} — {{ p.t6_id }}</option>{% endfor %}</select></label>
-<label>Assignment label <input name="label"></label><label>Role <select name="role">{% for role in roles %}<option>{{ role }}</option>{% endfor %}</select></label><label>Start date <input name="start" type="date"></label><label>End date (optional) <input name="end" type="date"></label><button>Add Assignment</button></form></section>"""
+<label>Assignment label <input name="label"></label><label>Role <select name="role">{% for role in roles %}<option>{{ role }}</option>{% endfor %}</select></label><label>Start date <input name="start" type="date"></label><label>End date (optional) <input name="end" type="date"></label><label>Remarks <input name="remarks"></label><button>Add Assignment</button></form></section>"""
 )
 EXCEPTIONS = """<!doctype html><title>Import exceptions</title><h1>Import exceptions</h1><a href="/">Inventory</a>
 <p>Rows the Drive import could not read, kept for review. The import runs with the <code>t6</code> command, not here.</p>
@@ -157,7 +157,13 @@ def create_app(client: Client, outbox: str, *, retry_interval: float = 5.0) -> F
         }
         drives = gateway.read("drive_list", DriveListInput(**filters))["drives"]
         return render_template_string(
-            INDEX, drives=drives, q=q, status=status, project=project, projects=gateway.projects()
+            INDEX,
+            drives=drives,
+            q=q,
+            status=status,
+            project=project,
+            projects=gateway.projects(),
+            display=gateway.project_display,
         )
 
     def facts(form: Mapping[str, str]) -> dict[str, Any]:
@@ -193,7 +199,8 @@ def create_app(client: Client, outbox: str, *, retry_interval: float = 5.0) -> F
             title="Edit Drive" if drive_id else "New Drive",
             editing=drive_id is not None,
             values=values,
-            fields=EDIT_FIELDS if drive_id else ADD_FIELDS,
+            fields=ADD_FIELDS,
+            version=values.get("expected_version") or values.get("version"),
             labels=LABELS,
             error=error,
             csrf=csrf(),
@@ -220,19 +227,29 @@ def create_app(client: Client, outbox: str, *, retry_interval: float = 5.0) -> F
 
     @app.route("/drive/<drive_id>/edit", methods=["GET", "POST"])
     def edit(drive_id):
-        drive = drive_record(drive_id)
         if request.method == "GET":
-            return form_page(drive_id, drive)
-        values: dict[str, Any] = {name: request.form.get(name, "").strip() for name in EDIT_FIELDS}
-        values["needs_review"] = request.form.get("needs_review") == "on"
+            return form_page(drive_id, drive_record(drive_id))
+        try:
+            checked = facts(request.form)
+        except ValueError as error:
+            return form_page(drive_id, request.form, str(error)), 400
+        # A blank clears a fact, so every field is sent; `facts` only judged the form.
+        values: dict[str, Any] = {name: request.form.get(name, "").strip() for name in ADD_FIELDS}
+        values["ownership_known"] = checked["ownership_known"]
+        values["needs_review"] = checked["needs_review"]
+        values["expected_version"] = request.form.get("expected_version", "").strip() or None
         outcome = gateway.submit(
             "drive_edit", {"drive": drive_id, **values}, posted_key(request.form)
         )
-        return finish(
-            outcome,
-            lambda done: "/drive/" + drive_id,
-            lambda error: form_page(drive_id, request.form, error),
-        )
+
+        def again(error: str) -> str:
+            if isinstance(outcome, Refused) and outcome.rule == "drive_changed":
+                # The form is the Drive as it is now, with its new version; what was typed is not kept.
+                error = "The Drive changed since you opened this form. It is shown again as it is now; check it and save again."
+                return form_page(drive_id, drive_record(drive_id), error)
+            return form_page(drive_id, request.form, error)
+
+        return finish(outcome, lambda done: "/drive/" + drive_id, again)
 
     @app.get("/drive/<drive_id>")
     def detail(drive_id):
@@ -262,7 +279,7 @@ def create_app(client: Client, outbox: str, *, retry_interval: float = 5.0) -> F
         values = {"drive": drive_id}
         for name in ("project", "label", "role"):
             values[name] = request.form.get(name, "").strip()
-        for name in ("start", "end"):
+        for name in ("start", "end", "remarks"):
             if request.form.get(name, "").strip():
                 values[name] = request.form[name].strip()
         outcome = gateway.submit(
@@ -278,11 +295,7 @@ def create_app(client: Client, outbox: str, *, retry_interval: float = 5.0) -> F
 
     @app.post("/drive/<drive_id>/assignments/<int:number>/end")
     def end_assignment(drive_id, number):
-        values = {
-            "drive": drive_id,
-            "project": request.form.get("project", ""),
-            "assignment": number,
-        }
+        values = {"drive": drive_id, "assignment": number}
         if request.form.get("end", "").strip():
             values["end"] = request.form["end"].strip()
         outcome = gateway.submit("drive_unassign", values, posted_key(request.form))

@@ -34,14 +34,18 @@ def finish(
     *,
     missing_is_404: bool = True,
 ):
-    """Done goes on to `location`; anything else is shown on the form again, with its reason."""
+    """Done goes on to `location`; anything else is shown on the form again, with its reason.
+
+    A step the Drive's state does not allow (`custody`, `drive_changed`) answers 409, any other refusal 400.
+    """
     if isinstance(outcome, Done):
         return redirect(location(outcome), code=303)
     if isinstance(outcome, Queued):
         return QUEUED, 202
     if missing_is_404 and isinstance(outcome, Refused) and outcome.rule == "drive":
         abort(404)
-    return again(describe(outcome)), 400
+    refused_by_state = isinstance(outcome, Refused) and outcome.rule in ("custody", "drive_changed")
+    return again(describe(outcome)), 409 if refused_by_state else 400
 
 
 def notice(error: str, back: str, label: str = "Drive details") -> str:

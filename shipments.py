@@ -21,6 +21,8 @@ FORM = (
 <label>Existing party kind <select name="party_kind"><option value="">Choose</option>{% for kind in ['contact', 'studio'] %}<option {% if form.get('party_kind') == kind %}selected{% endif %}>{{ kind }}</option>{% endfor %}</select></label>
 <label>Party (page ID or name) <input name="party" value="{{ form.get('party', '') }}"></label>
 <label>Project <select name="project">{% for p in projects %}<option value="{{ p.t6_id }}"{% if form.get('project') == p.t6_id %} selected{% endif %}>{{ p.name }} — {{ p.project_code or 'unknown code' }} — {{ p.t6_id }}</option>{% endfor %}</select></label>
+<label>Recipient (who took the Drives, free text) <input name="recipient" value="{{ form.get('recipient', '') }}"></label>
+<label>Reason <input name="reason" value="{{ form.get('reason', '') }}"></label>
 <button>Release selected Drives</button></form>"""
 )
 
@@ -29,12 +31,14 @@ MANIFEST = """<!doctype html><html><head><meta charset="utf-8"><title>Shipment {
 <nav class="navigation"><a href="/">Inventory</a> <a href="/shipments">Shipments</a> <button type="button" onclick="window.print()">Print manifest</button></nav>
 <main id="manifest"><h1>Shipment {{ id }}</h1>
 <p>Recipient: {% if e.party %}{{ e.party.kind }}: {{ e.party.ref.page_id or e.party.ref.text }}{% else %}Unknown recipient{% endif %}</p>
-<p>Business date: {{ e.on or 'Unknown date' }}</p>
+{% if recipient %}<p>Taken by: {{ recipient }}</p>{% endif %}
+<p>Business date: {{ e.on or 'Unknown date' }}</p>{% if e.reason %}
+<p>Reason: {{ e.reason }}</p>{% endif %}
 <p>Recorded by (the t6 API's authenticated Person): {{ e.logged_by.page_id or e.logged_by.text }}</p>
 <p>Project: {{ display(e.project) }}</p>
 <table><thead><tr><th>Permanent Drive ID</th><th>Accepted serial</th><th>Suspected serial (uncertain)</th><th>Label</th><th>Description</th><th>Capacity (TB)</th><th>Review state / note</th></tr></thead><tbody>
 {% for r in releases %}{% set d = r.drive %}<tr data-drive-id="{{ d.id }}"><td>{{ d.id }}</td><td>{{ d.serial or 'Unknown accepted serial' }}</td><td>{{ d.suspected_serial or 'Unknown suspected serial' }}</td><td>{{ d.label or 'Unknown label' }}</td><td>{{ d.description or 'Unknown description' }}</td><td>{{ d.capacity_tb if d.capacity_tb is not none else 'Unknown capacity' }}</td><td>{{ 'Needs review' if d.needs_review else 'Not flagged' }}; {{ d.review_note or 'Unknown review note' }}</td></tr>{% endfor %}</tbody></table>
-<p>Drive facts are as they stand now in the t6 database; the release events are the record of the handover. This is not open Project use.</p></main></body></html>"""
+<p>{% if facts_at_release %}Drive facts are as they were at release, kept with the shipment{% else %}Drive facts were not kept for this shipment, which was released before the t6 API kept them; these are the facts as they stand now{% endif %}. The release events are the record of the handover. This is not open Project use.</p></main></body></html>"""
 
 LIST = """<!doctype html><title>Shipments</title><h1>Shipments</h1><a href="/">Inventory</a> <a href="/shipments/new">Release shipment</a><ul>{% for s in shipments %}<li><a href="/shipments/{{ s.shipment_id }}">{{ s.shipment_id }}</a> — {% if s.party %}{{ s.party.ref.text or s.party.ref.page_id }}{% else %}Unknown recipient{% endif %} — {{ s.on or 'Unknown date' }} — {{ display(s.project) }} — {{ s.drive_count }} Drive{{ '' if s.drive_count == 1 else 's' }}</li>{% endfor %}</ul>"""
 
@@ -66,8 +70,9 @@ def register_shipments(app: Flask, gateway: Gateway, csrf: Callable[[], str]) ->
             "party": form.get("party", "").strip(),
             "party_kind": form["party_kind"],
         }
-        if form.get("on", "").strip():
-            values["on"] = form["on"].strip()
+        for name in ("on", "reason", "recipient"):
+            if form.get(name, "").strip():
+                values[name] = form[name].strip()
         outcome = gateway.submit("drive_release", values, posted_key(form))
         return finish(
             outcome,
@@ -88,6 +93,8 @@ def register_shipments(app: Flask, gateway: Gateway, csrf: Callable[[], str]) ->
             MANIFEST,
             id=shipment["shipment_id"],
             e=shipment["releases"][0]["event"],
+            recipient=shipment["recipient"],
+            facts_at_release=shipment["facts_at_release"],
             releases=shipment["releases"],
             display=gateway.project_display,
         )

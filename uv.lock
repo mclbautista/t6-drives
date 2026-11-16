@@ -591,8 +591,8 @@ wheels = [
 
 [[package]]
 name = "t6"
-version = "0.6.1"
-source = { git = "https://github.com/mclbautista/t6-core.git?rev=v0.6.1#ddd72fcf8377d55d4e7afd3852e00d86cc166491" }
+version = "0.6.2"
+source = { git = "https://github.com/mclbautista/t6-core.git?rev=v0.6.2#7e83e80a4c63f8b8015cb793be9e13e0928e9e95" }
 dependencies = [
     { name = "jsonschema" },
     { name = "pydantic" },
@@ -626,7 +626,7 @@ requires-dist = [
     { name = "cryptography", specifier = "==46.0.3" },
     { name = "flask", specifier = "==3.1.3" },
     { name = "gunicorn", specifier = "==23.0.0" },
-    { name = "t6", git = "https://github.com/mclbautista/t6-core.git?rev=v0.6.1" },
+    { name = "t6", git = "https://github.com/mclbautista/t6-core.git?rev=v0.6.2" },
 ]
 
 [package.metadata.requires-dev]

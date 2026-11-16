@@ -1,39 +1,41 @@
-"""Local synthetic inventory. Inventory is deliberately not a complete DriveStore."""
+"""The Drive web app: a client of the t6 API. It owns no records."""
 
-import json
 import logging
 import math
 import secrets
-import sqlite3
 from collections.abc import Mapping
-from dataclasses import asdict, replace
-from datetime import date
 from typing import Any
 
 from flask import Flask, abort, redirect, render_template_string, request, session
-from t6.drives import Drive, FormFactor, normalize_serial
-from werkzeug.exceptions import HTTPException
+from t6.client import Client
+from t6.verbs import DriveExceptionsInput, DriveGetInput, DriveListInput
+from t6.vocabulary import DRIVE_ROLES
+from werkzeug.exceptions import HTTPException, NotFound
 
-from assignments import ProjectReader, install
-from custody import HISTORY, Custody, register_custody
-from shipments import Shipments, register_shipments
+from custody import HISTORY, register_custody
+from forms import HIDDEN, finish, new_key, notice, posted_key
+from gateway import ApiRefused, ApiUnavailable, Gateway
+from outbox import Outbox
+from shipments import register_shipments
 
-FIELDS = (
+# Everything `drive add` takes. `drive edit` takes only the first six, and `ownership` stands for two inputs.
+ADD_FIELDS = (
+    "label",
     "serial",
     "suspected_serial",
-    "label",
+    "review_note",
+    "form_factor",
     "description",
     "brand",
     "model",
     "capacity_tb",
     "format",
-    "form_factor",
     "owner_studio_id",
     "purchase_date",
     "warranty",
     "remarks",
-    "review_note",
 )
+EDIT_FIELDS = ADD_FIELDS[:5]
 LABELS = {
     "serial": "Accepted serial",
     "suspected_serial": "Suspected serial (uncertain)",
@@ -45,179 +47,65 @@ LABELS = {
     "review_note": "Review note",
 }
 
-
-class StaleEdit(ValueError):
-    """A form predates a committed write, or has no revision."""
-
-
-def encode(drive: Drive) -> str:
-    data = asdict(drive)
-    data["form_factor"] = drive.form_factor.value if drive.form_factor else None
-    data["purchase_date"] = drive.purchase_date.isoformat() if drive.purchase_date else None
-    return json.dumps(data)
-
-
-def decode(raw: str) -> Drive:
-    data = json.loads(raw)
-    if data["form_factor"]:
-        data["form_factor"] = FormFactor(data["form_factor"])
-    if data["purchase_date"]:
-        data["purchase_date"] = date.fromisoformat(data["purchase_date"])
-    return Drive(**data)
-
-
-def facts(form: Mapping[str, str]) -> dict[str, Any]:
-    values: dict[str, Any] = {name: form.get(name, "").strip() or None for name in FIELDS}
-    if values["capacity_tb"] is not None:
-        try:
-            values["capacity_tb"] = float(values["capacity_tb"])
-        except ValueError:
-            raise ValueError("Capacity must be a finite positive number.") from None
-        if not math.isfinite(values["capacity_tb"]) or values["capacity_tb"] <= 0:
-            raise ValueError("Capacity must be a finite positive number.")
-    if values["purchase_date"]:
-        try:
-            values["purchase_date"] = date.fromisoformat(values["purchase_date"])
-        except ValueError:
-            raise ValueError("Purchase date must be a valid ISO date (YYYY-MM-DD).") from None
-    if values["form_factor"]:
-        try:
-            values["form_factor"] = FormFactor(values["form_factor"])
-        except ValueError:
-            raise ValueError("Choose a valid form factor.") from None
-    ownership = form.get("ownership", "unknown")
-    if ownership not in ("unknown", "t6", "studio") or (
-        bool(values["owner_studio_id"]) != (ownership == "studio")
-    ):
-        raise ValueError("Choose unknown, T6, or Studio with an existing Studio ID.")
-    values["ownership_known"] = ownership != "unknown"
-    values["needs_review"] = form.get("needs_review") == "on"
-    return values
-
-
-class Inventory:
-    """App-owned fact interface: replace immutable core Drive under a write lock.
-
-    This only implements inventory; it is not the core DriveStore protocol.
-    """
-
-    def __init__(self, path: str) -> None:
-        self.path = path
-        with self.connect() as db:
-            db.execute(
-                "CREATE TABLE IF NOT EXISTS drives (id TEXT PRIMARY KEY, serial TEXT UNIQUE, facts TEXT NOT NULL)"
-            )
-
-            columns = {row[1] for row in db.execute("PRAGMA table_info(drives)")}
-            if "revision" not in columns:
-                db.execute("ALTER TABLE drives ADD COLUMN revision INTEGER NOT NULL DEFAULT 1")
-
-            if "ownership_known" not in columns:
-                # Earlier synthetic stores used core None=T6 explicitly. Do not relabel them.
-                db.execute(
-                    "ALTER TABLE drives ADD COLUMN ownership_known INTEGER NOT NULL DEFAULT 1"
-                )
-
-    def connect(self) -> sqlite3.Connection:
-        return sqlite3.connect(self.path, timeout=10)
-
-    def get(self, drive_id: str) -> tuple[Drive, int, bool] | None:
-        with self.connect() as db:
-            row = db.execute(
-                "SELECT facts, revision, ownership_known FROM drives WHERE id=?", (drive_id,)
-            ).fetchone()
-        return (decode(row[0]), row[1], bool(row[2])) if row else None
-
-    def all(self) -> list[Drive]:
-        with self.connect() as db:
-            rows = db.execute("SELECT facts FROM drives ORDER BY rowid").fetchall()
-        return [decode(row[0]) for row in rows]
-
-    def exact(self, serial: str) -> Drive | None:
-        with self.connect() as db:
-            row = db.execute(
-                "SELECT facts FROM drives WHERE serial=?", (normalize_serial(serial),)
-            ).fetchone()
-        return decode(row[0]) if row else None
-
-    def save(
-        self,
-        values: Mapping[str, Any],
-        drive_id: str | None = None,
-        promote: bool = False,
-        revision: str | None = None,
-    ) -> Drive:
-        values = dict(values)
-        ownership_known = values.pop("ownership_known", None)
-        try:
-            with self.connect() as db:
-                db.execute("BEGIN IMMEDIATE")
-                if drive_id:
-                    row = db.execute(
-                        "SELECT facts, revision, ownership_known FROM drives WHERE id=?",
-                        (drive_id,),
-                    ).fetchone()
-                    if not row:
-                        raise LookupError
-                    if str(row[1]) != revision:
-                        raise StaleEdit("Drive changed. Reload the form before editing.")
-                    if ownership_known is None:
-                        ownership_known = bool(row[2])
-                    old = decode(row[0])
-                    if promote:
-                        if old.suspected_serial is None:
-                            raise ValueError("No suspected serial to promote.")
-                        values = {"serial": old.suspected_serial, "suspected_serial": None}
-                    drive = replace(old, **values)
-                    db.execute(
-                        "UPDATE drives SET serial=?, facts=?, revision=revision+1, ownership_known=? WHERE id=?",
-                        (drive.serial, encode(drive), ownership_known, drive.id),
-                    )
-                else:
-                    drive = Drive(**values)
-                    db.execute(
-                        "INSERT INTO drives (id, serial, facts, ownership_known) VALUES (?, ?, ?, ?)",
-                        (drive.id, drive.serial, encode(drive), bool(ownership_known)),
-                    )
-            return drive
-        except sqlite3.IntegrityError:
-            raise ValueError("Accepted serial already belongs to another Drive.") from None
-
-
-FORM = """<!doctype html><title>{{ title }}</title><h1>{{ title }}</h1>
+INDEX = """<!doctype html><title>Inventory</title><h1>Inventory</h1><a href="/exceptions">Import exceptions</a> <a href="/shipments">Shipments</a> <a href="/shipments/new">Release shipment</a> <a href="/new">New Drive</a> <a href="/outbox">Outbox</a><form><label>Search <input name="q" value="{{ q }}"></label><label>Exact accepted serial <input name="serial"></label><label>Review <select name="review"><option value="">All</option><option value="yes">Needs review</option><option value="no">Not flagged</option></select></label><label>Project (open use) <select name="project"><option value="">All Projects</option>{% for p in projects %}<option value="{{ p.t6_id }}" {% if project == p.t6_id %}selected{% endif %}>{{ p.name }} — code: {{ p.project_code or 'unknown' }} — {{ p.t6_id }}</option>{% endfor %}</select></label><label>Status <select name="status" aria-label="Status"><option value="">All</option>{% for choice in ["unknown", "in custody", "released", "retired"] %}<option {% if status == choice %}selected{% endif %}>{{ choice }}</option>{% endfor %}</select></label><button>Find</button></form><ul>{% for d in drives %}<li><a href="/drive/{{ d.id }}">{{ d.id }}</a> {{ d.label or '' }} {{ d.description or '' }} Custody status: {{ d.status }} {% if d.serial %}Accepted: {{ d.serial }}{% endif %} {% if d.suspected_serial %}Suspected (uncertain): {{ d.suspected_serial }}{% endif %} {% if d.needs_review %}Needs review{% endif %}</li>{% endfor %}</ul>"""
+FORM = (
+    """<!doctype html><title>{{ title }}</title><h1>{{ title }}</h1>
 <a href="/">Inventory</a>{% if error %}<p role="alert">{{ error }}</p>{% endif %}
-<form method="post"><input type="hidden" name="csrf" value="{{ csrf }}">
-<input type="hidden" name="revision" value="{{ revision }}">
-<p><label for="ownership">Ownership</label> <select id="ownership" name="ownership">{% for choice, label in [("unknown", "Unknown ownership"), ("t6", "T6"), ("studio", "Studio")] %}<option value="{{ choice }}" {% if values.get("ownership", "unknown") == choice %}selected{% endif %}>{{ label }}</option>{% endfor %}</select></p>
+<form method="post">"""
+    + HIDDEN
+    + """
+{% if not editing %}<p><label for="ownership">Ownership</label> <select id="ownership" name="ownership">{% for choice, label in [("unknown", "Unknown ownership"), ("t6", "T6"), ("studio", "Studio")] %}<option value="{{ choice }}" {% if values.get("ownership", "unknown") == choice %}selected{% endif %}>{{ label }}</option>{% endfor %}</select></p>{% endif %}
 {% for name in fields %}<p><label>{{ labels.get(name, name|capitalize) }}
 {% if name == 'form_factor' %}<select name="form_factor"><option value="">Unknown</option>{% for choice in ['portable', 'powered desktop'] %}<option value="{{ choice }}" {% if values.get(name) == choice %}selected{% endif %}>{{ choice }}</option>{% endfor %}</select>
 {% else %}<input name="{{ name }}" value="{{ values.get(name) or '' }}">{% endif %}</label></p>{% endfor %}
 <p><label><input type="checkbox" name="needs_review" {% if values.get('needs_review') %}checked{% endif %}> Needs review</label></p><button>Save</button></form>"""
+)
+DETAIL = (
+    """<!doctype html><title>Drive</title><h1>Drive {{ d.id }}</h1><a href="/">Inventory</a> <a href="/drive/{{ d.id }}/edit">Edit</a> <a href="/drive/{{ d.id }}/custody">Record custody</a><p>Custody status: {{ d.status }}</p>{{ history|safe }}<dl>{% for name in fields %}{% if d.get(name) is not none %}<dt>{{ labels.get(name, name|capitalize) }}</dt><dd>{{ d[name] }}</dd>{% endif %}{% endfor %}<dt>Ownership</dt><dd>{{ ownership }}</dd><dt>Needs review</dt><dd>{{ 'Yes' if d.needs_review else 'No' }}</dd></dl>{% if d.suspected_serial %}<form method="post" action="/drive/{{ d.id }}/promote">"""
+    + HIDDEN
+    + """<button>Promote suspected serial to accepted</button></form>{% endif %}
+<section><h2>Project use / Assignment history</h2><p>Assignments record Project use, not physical custody.</p>
+<ul>{% for a in assignments %}<li data-assignment-id="{{ a.number }}">{{ display(a.project) }} — Label: {{ a.label or 'Unknown' }} — Role: {{ a.role or 'Unknown' }} — Start: {{ a.start or 'Unknown' }} — End: {{ a.end or 'Open' }} — {{ a.remarks or '' }}
+{% if a.open and a.project and a.project.page_id %}<form method="post" action="/drive/{{ d.id }}/assignments/{{ a.number }}/end">"""
+    + HIDDEN
+    + """<input type="hidden" name="project" value="{{ a.project.page_id }}"><label>End date <input name="end" type="date" required></label><button>End Assignment</button></form>{% endif %}</li>{% endfor %}</ul>
+<h3>Add Assignment</h3><form method="post" action="/drive/{{ d.id }}/assignments">"""
+    + HIDDEN
+    + """
+<label>Project <select name="project">{% for p in projects %}<option value="{{ p.t6_id }}">{{ p.name }} — {{ p.project_code or 'unknown code' }} — {{ p.t6_id }}</option>{% endfor %}</select></label>
+<label>Assignment label <input name="label"></label><label>Role <select name="role">{% for role in roles %}<option>{{ role }}</option>{% endfor %}</select></label><label>Start date <input name="start" type="date"></label><label>End date (optional) <input name="end" type="date"></label><button>Add Assignment</button></form></section>"""
+)
+EXCEPTIONS = """<!doctype html><title>Import exceptions</title><h1>Import exceptions</h1><a href="/">Inventory</a>
+<p>Rows the Drive import could not read, kept for review. The import runs with the <code>t6</code> command, not here.</p>
+{% if exceptions %}<table><thead><tr><th>Workbook</th><th>Sheet</th><th>Row</th><th>Reason</th><th>Detail</th></tr></thead><tbody>{% for x in exceptions %}<tr><td>{{ x.workbook }}</td><td>{{ x.sheet }}</td><td>{{ x.row }}</td><td>{{ x.reason }}</td><td>{{ x.detail }}</td></tr>{% endfor %}</tbody></table>{% else %}<p>No import exceptions.</p>{% endif %}"""
+OUTBOX = """<!doctype html><title>Outbox</title><h1>Outbox</h1><a href="/">Inventory</a>
+<p>Changes the t6 API could not take yet. Each is sent again, with its key, until the API answers; it is recorded once.</p>
+{% if entries %}<ul>{% for e in entries %}<li data-key="{{ e.key }}">{% if e.state == 'failed' %}Failed{% else %}Queued{% endif %}: {{ e.verb|replace('_', ' ') }} ({{ e.queued_at }}){% for name, value in e.inputs.items() %} {{ name }}={{ value }};{% endfor %}
+{% if e.state == 'failed' %}<p role="alert">The t6 API refused it: {{ e.reason }}</p><form method="post" action="/outbox/{{ e.key }}/dismiss"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="key" value="{{ new_key() }}"><button>Dismiss</button></form>{% endif %}</li>{% endfor %}</ul>{% else %}<p>Nothing is waiting.</p>{% endif %}"""
+UNAVAILABLE = '<!doctype html><title>Unavailable</title><h1>Unavailable</h1><p role="alert">The t6 API is unavailable. Nothing was lost; try again shortly.</p><a href="/">Inventory</a>'
 
 
-def create_app(
-    database: str,
-    project_reader: ProjectReader | None = None,
-    *,
-    custody_actor_policy: str = "unknown",
-) -> Flask:
-    # Version 0 is the existing synthetic schema, upgraded by idempotent adapters.
-    # Reject future versions before any adapter can mutate the file.
-    with sqlite3.connect(database) as db:
-        if db.execute("PRAGMA user_version").fetchone()[0] not in (0, 1):
-            raise RuntimeError("Unsupported database schema; restore a compatible recovery point.")
+def create_app(client: Client, outbox: str, *, retry_interval: float = 5.0) -> Flask:
     app = Flask(__name__)
     app.secret_key = secrets.token_bytes(32)
     app.config.update(
         SESSION_COOKIE_HTTPONLY=True, SESSION_COOKIE_SAMESITE="Strict", MAX_CONTENT_LENGTH=65536
     )
-    inventory = Inventory(database)
-    custody = Custody(inventory.connect)
+    gateway = Gateway(client, Outbox(outbox), retry_interval)
 
     @app.errorhandler(Exception)
     def safe_error(error):
         if isinstance(error, HTTPException):
             return error
+        if isinstance(error, ApiUnavailable):
+            return UNAVAILABLE, 503
+        if isinstance(error, ApiRefused):
+            if error.rule in ("drive", "shipment"):
+                return NotFound()
+            return render_template_string(
+                '<!doctype html><title>Refused</title><p role="alert">{{ reason }}</p><a href="/">Inventory</a>',
+                reason=error.reason,
+            ), 502
         app.logger.error("Unexpected inventory error")
         return "Unexpected inventory error.", 500
 
@@ -244,150 +132,199 @@ def create_app(
             ) or not session.get("csrf"):
                 abort(403)
 
-    def csrf():
-        if "csrf" not in session:
-            session["csrf"] = secrets.token_hex(32)
-        return session["csrf"]
-
-    from imports import register_imports
-
-    register_imports(app, database)
-    assignments = install(app, database, project_reader)
-    register_custody(app, custody, csrf, custody_actor_policy)
-    register_shipments(app, Shipments(inventory.connect, assignments), csrf, custody_actor_policy)
-
-    with sqlite3.connect(database) as db:
-        db.execute("PRAGMA user_version=1")
+    @app.before_request
+    def retry_queued_writes():
+        if request.path != "/health":
+            gateway.retry()
 
     @app.get("/health")
     def health():
-        # Process/startup readiness only: no records, paths, counts or diagnostics.
+        # Process/startup readiness only: it never calls the API.
         return "", 204
 
     @app.get("/")
     def index():
-        q = request.args.get("q", "").strip().casefold()
-        serial = request.args.get("serial", "").strip()
-        review = request.args.get("review", "")
-        project = request.args.get("project", "")
-        unresolved = request.args.get("project_text", "")
+        q = request.args.get("q", "").strip()
         status = request.args.get("status", "")
-        drives = [inventory.exact(serial)] if serial else inventory.all()
-        drives = [
-            d
-            for d in drives
-            if d
-            and (
-                not q
-                or any(
-                    q in (v or "").casefold()
-                    for v in (d.id, d.serial, d.suspected_serial, d.label, d.description)
-                )
-            )
-            and (review not in ("yes", "no") or d.needs_review == (review == "yes"))
-            and (not project or assignments.matches(d.id, project, ""))
-            and (not unresolved or assignments.matches(d.id, "", unresolved))
-            and (not status or custody.status(d.id) == status)
-        ]
+        project = request.args.get("project", "")
+        review = request.args.get("review", "")
+        filters: dict[str, Any] = {
+            "q": q or None,
+            "serial": request.args.get("serial", "").strip() or None,
+            "needs_review": {"yes": True, "no": False}.get(review),
+            "project": project or None,
+            "status": status or None,
+        }
+        drives = gateway.read("drive_list", DriveListInput(**filters))["drives"]
         return render_template_string(
-            """<!doctype html><title>Inventory</title><h1>Inventory</h1><a href="/exceptions">Import exceptions</a> <a href="/shipments">Shipments</a> <a href="/shipments/new">Release shipment</a> <a href="/new">New Drive</a><form><label>Search <input name="q" value="{{ q }}"></label><label>Exact accepted serial <input name="serial"></label><label>Review <select name="review"><option value="">All</option><option value="yes">Needs review</option><option value="no">Not flagged</option></select></label>{{ project_cache|safe }}<label>Status <select name="status" aria-label="Status"><option value="">All</option>{% for choice in ["unknown", "in custody", "released", "retired"] %}<option {% if status == choice %}selected{% endif %}>{{ choice }}</option>{% endfor %}</select></label><button>Find</button></form><ul>{% for d in drives %}<li><a href="/drive/{{ d.id }}">{{ d.id }}</a> {{ d.label or '' }} {{ d.description or '' }} Custody status: {{ custody.status(d.id) }} {% if d.serial %}Accepted: {{ d.serial }}{% endif %} {% if d.suspected_serial %}Suspected (uncertain): {{ d.suspected_serial }}{% endif %} {% if d.needs_review %}Needs review{% endif %}<p>Open Project use (not custody): {{ open_use(d.id)|join('; ') or 'None recorded' }}</p></li>{% endfor %}</ul>""",
-            drives=drives,
-            custody=custody,
-            status=status,
-            q=q,
-            project_cache=assignments.cache_html(),
-            open_use=assignments.open_use,
+            INDEX, drives=drives, q=q, status=status, project=project, projects=gateway.projects()
         )
 
-    @app.route("/new", methods=["GET", "POST"])
-    @app.route("/drive/<drive_id>/edit", methods=["GET", "POST"])
-    def edit(drive_id=None):
-        record = inventory.get(drive_id) if drive_id else None
-        if drive_id and not record:
-            abort(404)
-        drive, revision, ownership_known = record if record else (None, "", False)
-        values = json.loads(encode(drive)) if drive else {}
-        values["ownership"] = (
-            ("studio" if drive and drive.owner_studio_id else "t6")
-            if ownership_known
-            else "unknown"
-        )
-        error = None
-        if request.method == "POST":
-            values = request.form.to_dict()
+    def facts(form: Mapping[str, str]) -> dict[str, Any]:
+        """The form as `drive add` inputs; what the form itself cannot judge is left to the API."""
+        values: dict[str, Any] = {name: form.get(name, "").strip() or None for name in ADD_FIELDS}
+        if values["capacity_tb"] is not None:
             try:
-                result = inventory.save(
-                    facts(request.form), drive_id, revision=request.form.get("revision")
-                )
-                return redirect("/drive/" + result.id, code=303)
-            except StaleEdit:
-                return 'Drive changed. <a href="">Reload the form</a> before editing.', 409
-            except ValueError as exc:
-                # Core exceptions can contain user data; return a fixed message.
-                # Offer only a fresh GET, never a cleared full-replacement edit form.
-                error = (
-                    str(exc)
-                    if str(exc)
-                    in (
-                        "Capacity must be a finite positive number.",
-                        "Purchase date must be a valid ISO date (YYYY-MM-DD).",
-                        "Choose a valid form factor.",
-                        "Choose unknown, T6, or Studio with an existing Studio ID.",
-                        "Accepted serial already belongs to another Drive.",
-                    )
-                    else "Enter meaningful identifying detail and valid serial values."
-                )
-                return render_template_string(
-                    '<!doctype html><title>Invalid facts</title><p role="alert">{{ error }}</p>'
-                    '<a href="">Reload the form</a> to retry with current facts.',
-                    error=error,
-                ), 400
+                values["capacity_tb"] = float(values["capacity_tb"])
+            except ValueError:
+                raise ValueError("Capacity must be a finite positive number.") from None
+            if not math.isfinite(values["capacity_tb"]) or values["capacity_tb"] <= 0:
+                raise ValueError("Capacity must be a finite positive number.")
+        ownership = form.get("ownership", "unknown")
+        if ownership not in ("unknown", "t6", "studio") or (
+            bool(values["owner_studio_id"]) != (ownership == "studio")
+        ):
+            raise ValueError("Choose unknown, T6, or Studio with an existing Studio ID.")
+        values["ownership_known"] = ownership != "unknown"
+        values["needs_review"] = form.get("needs_review") == "on"
+        values["label"] = (
+            values["label"] or ""
+        )  # a missing label is for the API to refuse, with its reason
+        return {name: value for name, value in values.items() if value is not None}
+
+    def csrf() -> str:
+        if "csrf" not in session:
+            session["csrf"] = secrets.token_hex(32)
+        return session["csrf"]
+
+    def form_page(drive_id: str | None, values: Mapping[str, Any], error: str | None = None) -> str:
         return render_template_string(
             FORM,
-            title="Edit Drive" if drive else "New Drive",
+            title="Edit Drive" if drive_id else "New Drive",
+            editing=drive_id is not None,
             values=values,
-            fields=FIELDS,
+            fields=EDIT_FIELDS if drive_id else ADD_FIELDS,
             labels=LABELS,
             error=error,
             csrf=csrf(),
-            revision=revision,
-        ), (400 if error else 200)
+            new_key=new_key,
+        )
+
+    def drive_record(drive_id: str) -> dict[str, Any]:
+        return gateway.read("drive_get", DriveGetInput(drive=drive_id))["drive"]
+
+    @app.route("/new", methods=["GET", "POST"])
+    def new_drive():
+        if request.method == "GET":
+            return form_page(None, {})
+        try:
+            values = facts(request.form)
+        except ValueError as error:
+            return form_page(None, request.form, str(error)), 400
+        outcome = gateway.submit("drive_add", values, posted_key(request.form))
+        return finish(
+            outcome,
+            lambda done: "/drive/" + done.result["drive_ids"][0],
+            lambda error: form_page(None, request.form, error),
+        )
+
+    @app.route("/drive/<drive_id>/edit", methods=["GET", "POST"])
+    def edit(drive_id):
+        drive = drive_record(drive_id)
+        if request.method == "GET":
+            return form_page(drive_id, drive)
+        values: dict[str, Any] = {name: request.form.get(name, "").strip() for name in EDIT_FIELDS}
+        values["needs_review"] = request.form.get("needs_review") == "on"
+        outcome = gateway.submit(
+            "drive_edit", {"drive": drive_id, **values}, posted_key(request.form)
+        )
+        return finish(
+            outcome,
+            lambda done: "/drive/" + drive_id,
+            lambda error: form_page(drive_id, request.form, error),
+        )
 
     @app.get("/drive/<drive_id>")
     def detail(drive_id):
-        record = inventory.get(drive_id)
-        if not record:
-            abort(404)
-        drive, revision, ownership_known = record
-        values = json.loads(encode(drive))
-        history_html = render_template_string(
-            HISTORY, history=custody.history(drive_id), drive_id=drive_id
+        found = gateway.read("drive_get", DriveGetInput(drive=drive_id))
+        drive = found["drive"]
+        ownership = {"t6": "T6", "unknown": "Unknown ownership"}.get(
+            drive["ownership"], drive["owner_studio_id"]
         )
+        display = gateway.project_display
         return render_template_string(
-            """<!doctype html><title>Drive</title><h1>Drive {{ d.id }}</h1><a href="/">Inventory</a> <a href="/drive/{{ d.id }}/edit">Edit</a> <a href="/drive/{{ d.id }}/custody">Record custody</a><p>Custody status: {{ status }}</p><p>Actors are not authenticated; no accounts or enforced roles. Host/recovery approval remains required.</p>{{ history_html|safe }}<dl>{% for name in fields %}{% if values.get(name) is not none %}<dt>{{ labels.get(name, name|capitalize) }}</dt><dd>{{ values[name] }}</dd>{% endif %}{% endfor %}<dt>Ownership</dt><dd>{{ (d.owner_studio_id or "T6") if ownership_known else "Unknown ownership" }}</dd><dt>Needs review</dt><dd>{{ 'Yes' if d.needs_review else 'No' }}</dd></dl>{% if d.suspected_serial %}<form method="post" action="/drive/{{ d.id }}/promote"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="revision" value="{{ revision }}"><button>Promote suspected serial to accepted</button></form>{% endif %}{{ assignment_history|safe }}""",
+            DETAIL,
             d=drive,
-            status=custody.status(drive_id),
-            history_html=history_html,
-            assignment_history=assignments.detail_html(drive_id, csrf()),
-            ownership_known=ownership_known,
-            values=values,
-            fields=FIELDS,
+            assignments=found["assignments"],
+            ownership=ownership,
+            fields=ADD_FIELDS,
             labels=LABELS,
             csrf=csrf(),
-            revision=revision,
+            new_key=new_key,
+            history=render_template_string(HISTORY, events=found["events"], display=display),
+            projects=gateway.projects(),
+            display=display,
+            roles=DRIVE_ROLES,
+        )
+
+    @app.post("/drive/<drive_id>/assignments")
+    def add_assignment(drive_id):
+        values = {"drive": drive_id}
+        for name in ("project", "label", "role"):
+            values[name] = request.form.get(name, "").strip()
+        for name in ("start", "end"):
+            if request.form.get(name, "").strip():
+                values[name] = request.form[name].strip()
+        outcome = gateway.submit(
+            "drive_assign",
+            values,
+            posted_key(request.form),
+        )
+        return finish(
+            outcome,
+            lambda done: "/drive/" + drive_id,
+            lambda error: notice(error, "/drive/" + drive_id),
+        )
+
+    @app.post("/drive/<drive_id>/assignments/<int:number>/end")
+    def end_assignment(drive_id, number):
+        values = {
+            "drive": drive_id,
+            "project": request.form.get("project", ""),
+            "assignment": number,
+        }
+        if request.form.get("end", "").strip():
+            values["end"] = request.form["end"].strip()
+        outcome = gateway.submit("drive_unassign", values, posted_key(request.form))
+        return finish(
+            outcome,
+            lambda done: "/drive/" + drive_id,
+            lambda error: notice(error, "/drive/" + drive_id),
         )
 
     @app.post("/drive/<drive_id>/promote")
     def promote(drive_id):
-        try:
-            inventory.save({}, drive_id, promote=True, revision=request.form.get("revision"))
-        except LookupError:
+        outcome = gateway.submit(
+            "drive_promote_serial", {"drive": drive_id}, posted_key(request.form)
+        )
+        return finish(
+            outcome,
+            lambda done: "/drive/" + drive_id,
+            lambda error: notice(error, "/drive/" + drive_id),
+        )
+
+    register_custody(app, gateway, csrf)
+    register_shipments(app, gateway, csrf)
+
+    @app.get("/exceptions")
+    def exceptions():
+        listed = gateway.read("drive_exceptions", DriveExceptionsInput())["exceptions"]
+        return render_template_string(EXCEPTIONS, exceptions=listed)
+
+    @app.get("/outbox")
+    def show_outbox():
+        return render_template_string(
+            OUTBOX, entries=gateway.outbox.entries(), csrf=csrf(), new_key=new_key
+        )
+
+    @app.post("/outbox/<key>/dismiss")
+    def dismiss(key):
+        dismissed = gateway.outbox.dismiss(key)
+        if dismissed is None:
             abort(404)
-        except StaleEdit:
-            return "Drive changed. Reload the detail before promoting.", 409
-        except ValueError:
-            return "Cannot promote: no candidate or accepted serial already in use.", 400
-        return redirect("/drive/" + drive_id, code=303)
+        if not dismissed:
+            abort(400)
+        return redirect("/outbox", code=303)
 
     return app
 
@@ -396,7 +333,6 @@ if __name__ == "__main__":
     import os
 
     logging.getLogger("werkzeug").disabled = True
-    create_app(
-        os.environ.get("DRIVES_DB", "synthetic-inventory.sqlite"),
-        custody_actor_policy=os.environ.get("DRIVES_ACTOR_POLICY", "self-declared-required"),
-    ).run(host="127.0.0.1", port=5000, debug=False)
+    create_app(Client(), os.environ.get("DRIVES_OUTBOX", "outbox.json")).run(
+        host="127.0.0.1", port=5000, debug=False
+    )

@@ -4,15 +4,10 @@ import re
 import secrets
 from collections.abc import Callable, Mapping
 
-from flask import abort, redirect, render_template_string
+from flask import abort, redirect, render_template
 from t6.verbs import Done, Outcome, Refused
 
 from gateway import Queued, describe
-
-HIDDEN = '<input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="key" value="{{ new_key() }}">'
-
-
-QUEUED = '<!doctype html><title>Queued</title><h1>Queued</h1><p role="status">The t6 API cannot be reached, so this change is queued. It will be sent again, and recorded once, when the API is back.</p><a href="/outbox">Outbox</a> <a href="/">Inventory</a>'
 
 
 def new_key() -> str:
@@ -41,7 +36,7 @@ def finish(
     if isinstance(outcome, Done):
         return redirect(location(outcome), code=303)
     if isinstance(outcome, Queued):
-        return QUEUED, 202
+        return render_template("queued.html"), 202
     if missing_is_404 and isinstance(outcome, Refused) and outcome.rule == "drive":
         abort(404)
     refused_by_state = isinstance(outcome, Refused) and outcome.rule in ("custody", "drive_changed")
@@ -50,9 +45,4 @@ def finish(
 
 def notice(error: str, back: str, label: str = "Drive details") -> str:
     """A refusal for a form that has no page of its own to come back to."""
-    return render_template_string(
-        '<!doctype html><title>Not done</title><p role="alert">{{ error }}</p><a href="{{ back }}">{{ label }}</a>',
-        error=error,
-        back=back,
-        label=label,
-    )
+    return render_template("notice.html", error=error, back=back, label=label)

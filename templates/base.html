@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{% block title %}Drives{% endblock %} - Drives</title>
+<style>{% include "_style.css" %}</style>
+</head>
+<body>
+{% set path = request.path %}
+<a class="skip" href="#main">Skip to content</a>
+<header class="site">
+<div class="wrap bar">
+<a class="brand" href="/">Drives</a>
+<nav aria-label="Main">
+<a href="/"{% if path == "/" or path == "/new" or path.startswith("/drive/") %} aria-current="page"{% endif %}>Inventory</a>
+<a href="/shipments"{% if path == "/shipments" or (path.startswith("/shipments/") and path != "/shipments/new") %} aria-current="page"{% endif %}>Shipments</a>
+<a href="/exceptions"{% if path == "/exceptions" %} aria-current="page"{% endif %}>Exceptions</a>
+<a href="/outbox"{% if path == "/outbox" %} aria-current="page"{% endif %}>Outbox</a>
+</nav>
+<a class="btn btn--primary" href="/shipments/new">Release shipment</a>
+</div>
+</header>
+<main id="main" class="wrap" tabindex="-1">
+{% block content %}{% endblock %}
+</main>
+</body>
+</html>

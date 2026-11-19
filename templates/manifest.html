@@ -1,0 +1,18 @@
+{% extends "base.html" %}
+{% block title %}Shipment {{ id }}{% endblock %}
+{% block content %}
+<article id="manifest">
+<div class="page-head"><h1>Shipment {{ id }}</h1><div class="actions"><button type="button" class="btn" onclick="window.print()">Print manifest</button></div></div>
+<div class="card manifest-meta">
+<p>Recipient: {% if e.party %}{{ e.party.kind }}: {{ e.party.ref.page_id or e.party.ref.text }}{% else %}Unknown recipient{% endif %}</p>
+{% if recipient %}<p>Taken by: {{ recipient }}</p>{% endif %}
+<p>Business date: {{ e.on or 'Unknown date' }}</p>{% if e.reason %}
+<p>Reason: {{ e.reason }}</p>{% endif %}
+<p>Recorded by (the t6 API's authenticated Person): {{ e.logged_by.page_id or e.logged_by.text }}</p>
+<p>Project: {{ display(e.project) }}</p>
+</div>
+<div class="table-scroll"><table class="data"><thead><tr><th>Permanent Drive ID</th><th>Accepted serial</th><th>Suspected serial (uncertain)</th><th>Label</th><th>Description</th><th>Capacity (TB)</th><th>Review state / note</th></tr></thead><tbody>
+{% for r in releases %}{% set d = r.drive %}<tr data-drive-id="{{ d.id }}"><td class="mono">{{ d.id }}</td><td>{{ d.serial or 'Unknown accepted serial' }}</td><td>{{ d.suspected_serial or 'Unknown suspected serial' }}</td><td>{{ d.label or 'Unknown label' }}</td><td>{{ d.description or 'Unknown description' }}</td><td>{{ d.capacity_tb if d.capacity_tb is not none else 'Unknown capacity' }}</td><td>{{ 'Needs review' if d.needs_review else 'Not flagged' }}; {{ d.review_note or 'Unknown review note' }}</td></tr>{% endfor %}</tbody></table></div>
+<p class="muted note">{% if facts_at_release %}Drive facts are as they were at release, kept with the shipment{% else %}Drive facts were not kept for this shipment, which was released before the t6 API kept them; these are the facts as they stand now{% endif %}. The release events are the record of the handover. This is not open Project use.</p>
+</article>
+{% endblock %}

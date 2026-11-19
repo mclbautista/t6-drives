@@ -1,0 +1,7 @@
+{% extends "base.html" %}
+{% block title %}Import exceptions{% endblock %}
+{% block content %}
+<div class="page-head"><h1>Import exceptions</h1></div>
+<p class="lead">Rows the Drive import could not read, kept for review. The import runs with the <code>t6</code> command, not here.</p>
+{% if exceptions %}<div class="table-scroll" role="region" aria-label="Import exceptions table" tabindex="0"><table class="data"><thead><tr><th>Workbook</th><th>Sheet</th><th>Row</th><th>Reason</th><th>Detail</th></tr></thead><tbody>{% for x in exceptions %}<tr><td>{{ x.workbook }}</td><td>{{ x.sheet }}</td><td class="num">{{ x.row }}</td><td>{{ x.reason }}</td><td>{{ x.detail }}</td></tr>{% endfor %}</tbody></table></div>{% else %}<div class="card empty"><p class="empty-title">No import exceptions.</p></div>{% endif %}
+{% endblock %}

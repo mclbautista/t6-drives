@@ -1,0 +1,7 @@
+<section id="custody-history" class="card"><h2>Custody history</h2>
+<p class="muted">Append order determines status; business dates may be unknown or backdated. A correction is a later event.</p>
+{% if events %}<ol class="timeline">{% for e in events %}<li data-event-number="{{ loop.index }}" class="tl tl--{{ {'received': 'ok', 'returned': 'ok', 'released': 'info', 'retired': 'muted'}.get(e.kind, 'neutral') }}"><div class="tl-head"><strong>Event {{ loop.index }}: {{ e.kind }}</strong><span class="muted">Business date: {{ e.on or 'Unknown date' }}</span></div>
+<p>{% if e.party %}Party: {{ e.party.kind }}: {{ e.party.ref.page_id or e.party.ref.text }}<br>{% endif %}Project: {{ display(e.project) }}</p>
+<p>Reason: {{ e.reason or 'Unknown reason' }}{% if e.shipment_id %}<br><a href="/shipments/{{ e.shipment_id }}">Shipment {{ e.shipment_id }}</a>{% endif %}</p>
+<p class="muted small">Recorded by (the t6 API's authenticated Person): {{ e.logged_by.page_id or e.logged_by.text }}</p></li>{% endfor %}</ol>
+{% else %}<p class="empty-note">No custody events yet. A Drive with no events has unknown custody status.</p>{% endif %}</section>

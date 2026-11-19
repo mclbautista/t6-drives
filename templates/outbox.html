@@ -1,0 +1,11 @@
+{% extends "base.html" %}
+{% block title %}Outbox{% endblock %}
+{% block content %}
+<div class="page-head"><h1>Outbox</h1></div>
+<p class="lead">Changes the t6 API could not take yet. Each is sent again, with its key, until the API answers; it is recorded once.</p>
+{% if entries %}<ul class="outbox">{% for e in entries %}<li data-key="{{ e.key }}" class="{{ 'is-failed' if e.state == 'failed' else 'is-queued' }}">
+<div class="o-head"><span class="badge {{ 'badge--failed' if e.state == 'failed' else 'badge--queued' }}">{% if e.state == 'failed' %}Failed{% else %}Queued{% endif %}: {{ e.verb|replace('_', ' ') }}</span><span class="muted small">{{ e.queued_at }}</span></div>
+<p class="o-inputs">{% for name, value in e.inputs.items() %}<span class="meta"><b>{{ name }}</b>={{ value }};</span> {% endfor %}</p>
+{% if e.state == 'failed' %}<p role="alert">The t6 API refused it: {{ e.reason }}</p><form class="inline" method="post" action="/outbox/{{ e.key }}/dismiss"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="key" value="{{ new_key() }}"><button class="btn">Dismiss</button></form>{% endif %}
+</li>{% endfor %}</ul>{% else %}<div class="card empty"><p class="empty-title">Nothing is waiting.</p></div>{% endif %}
+{% endblock %}

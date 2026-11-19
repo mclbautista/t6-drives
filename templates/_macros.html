@@ -1,0 +1,2 @@
+{% macro status_badge(status) %}<span class="badge badge--{{ {'in custody': 'ok', 'released': 'info', 'retired': 'muted'}.get(status, 'neutral') }}"><span class="vh">Custody status: {{ status }}</span><span aria-hidden="true">{{ status }}</span></span>{% endmacro %}
+{% macro review_chip() %}<span class="chip chip--review">Needs review</span>{% endmacro %}

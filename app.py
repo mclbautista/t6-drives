@@ -6,14 +6,14 @@ import secrets
 from collections.abc import Mapping
 from typing import Any
 
-from flask import Flask, abort, redirect, render_template_string, request, session
+from flask import Flask, abort, redirect, render_template, request, session
 from t6.client import Client
 from t6.verbs import DriveExceptionsInput, DriveGetInput, DriveListInput, Refused
 from t6.vocabulary import DRIVE_ROLES
 from werkzeug.exceptions import HTTPException, NotFound
 
-from custody import HISTORY, register_custody
-from forms import HIDDEN, finish, new_key, notice, posted_key
+from custody import register_custody
+from forms import finish, new_key, notice, posted_key
 from gateway import ApiRefused, ApiUnavailable, Gateway
 from outbox import Outbox
 from shipments import register_shipments
@@ -46,44 +46,6 @@ LABELS = {
     "review_note": "Review note",
 }
 
-INDEX = """<!doctype html><title>Inventory</title><h1>Inventory</h1><a href="/exceptions">Import exceptions</a> <a href="/shipments">Shipments</a> <a href="/shipments/new">Release shipment</a> <a href="/new">New Drive</a> <a href="/outbox">Outbox</a><form><label>Search <input name="q" value="{{ q }}"></label><label>Exact accepted serial <input name="serial"></label><label>Review <select name="review"><option value="">All</option><option value="yes">Needs review</option><option value="no">Not flagged</option></select></label><label>Project (open use) <select name="project"><option value="">All Projects</option>{% for p in projects %}<option value="{{ p.t6_id }}" {% if project == p.t6_id %}selected{% endif %}>{{ p.name }} — code: {{ p.project_code or 'unknown' }} — {{ p.t6_id }}</option>{% endfor %}</select></label><label>Status <select name="status" aria-label="Status"><option value="">All</option>{% for choice in ["unknown", "in custody", "released", "retired"] %}<option {% if status == choice %}selected{% endif %}>{{ choice }}</option>{% endfor %}</select></label><button>Find</button></form><ul>{% for d in drives %}<li><a href="/drive/{{ d.id }}">{{ d.id }}</a> {{ d.label or '' }} {{ d.description or '' }} Custody status: {{ d.status }} {% if d.serial %}Accepted: {{ d.serial }}{% endif %} {% if d.suspected_serial %}Suspected (uncertain): {{ d.suspected_serial }}{% endif %} {% if d.needs_review %}Needs review{% endif %} Open Project use: {% for a in d.open_assignments %}{{ display(a.project) }} ({{ a.label or 'no label' }}, {{ a.role or 'unknown role' }}, from {{ a.start or 'unknown date' }}){% if not loop.last %}; {% endif %}{% else %}none{% endfor %}</li>{% endfor %}</ul>"""
-FORM = (
-    """<!doctype html><title>{{ title }}</title><h1>{{ title }}</h1>
-<a href="/">Inventory</a>{% if error %}<p role="alert">{{ error }}</p>{% endif %}
-<form method="post">"""
-    + HIDDEN
-    + """
-{% if editing %}<input type="hidden" name="expected_version" value="{{ version }}">{% endif %}
-<p><label for="ownership">Ownership</label> <select id="ownership" name="ownership">{% for choice, label in [("unknown", "Unknown ownership"), ("t6", "T6"), ("studio", "Studio")] %}<option value="{{ choice }}" {% if values.get("ownership", "unknown") == choice %}selected{% endif %}>{{ label }}</option>{% endfor %}</select></p>
-{% for name in fields %}<p><label>{{ labels.get(name, name|capitalize) }}
-{% if name == 'form_factor' %}<select name="form_factor"><option value="">Unknown</option>{% for choice in ['portable', 'powered desktop'] %}<option value="{{ choice }}" {% if values.get(name) == choice %}selected{% endif %}>{{ choice }}</option>{% endfor %}</select>
-{% else %}<input name="{{ name }}" value="{{ values.get(name) or '' }}">{% endif %}</label></p>{% endfor %}
-<p><label><input type="checkbox" name="needs_review" {% if values.get('needs_review') %}checked{% endif %}> Needs review</label></p><button>Save</button></form>"""
-)
-DETAIL = (
-    """<!doctype html><title>Drive</title><h1>Drive {{ d.id }}</h1><a href="/">Inventory</a> <a href="/drive/{{ d.id }}/edit">Edit</a> <a href="/drive/{{ d.id }}/custody">Record custody</a><p>Custody status: {{ d.status }}</p>{{ history|safe }}<dl>{% for name in fields %}{% if d.get(name) is not none %}<dt>{{ labels.get(name, name|capitalize) }}</dt><dd>{{ d[name] }}</dd>{% endif %}{% endfor %}<dt>Ownership</dt><dd>{{ ownership }}</dd><dt>Needs review</dt><dd>{{ 'Yes' if d.needs_review else 'No' }}</dd></dl>{% if d.suspected_serial %}<form method="post" action="/drive/{{ d.id }}/promote">"""
-    + HIDDEN
-    + """<button>Promote suspected serial to accepted</button></form>{% endif %}
-<section><h2>Project use / Assignment history</h2><p>Assignments record Project use, not physical custody.</p>
-<ul>{% for a in assignments %}<li data-assignment-id="{{ a.number }}">{{ display(a.project) }} — Label: {{ a.label or 'Unknown' }} — Role: {{ a.role or 'Unknown' }} — Start: {{ a.start or 'Unknown' }} — End: {{ a.end or 'Open' }} — {{ a.remarks or '' }}
-{% if a.open %}<form method="post" action="/drive/{{ d.id }}/assignments/{{ a.number }}/end">"""
-    + HIDDEN
-    + """<label>End date <input name="end" type="date" required></label><button>End Assignment</button></form>{% endif %}</li>{% endfor %}</ul>
-<h3>Add Assignment</h3><form method="post" action="/drive/{{ d.id }}/assignments">"""
-    + HIDDEN
-    + """
-<label>Project <select name="project">{% for p in projects %}<option value="{{ p.t6_id }}">{{ p.name }} — {{ p.project_code or 'unknown code' }} — {{ p.t6_id }}</option>{% endfor %}</select></label>
-<label>Assignment label <input name="label"></label><label>Role <select name="role">{% for role in roles %}<option>{{ role }}</option>{% endfor %}</select></label><label>Start date <input name="start" type="date"></label><label>End date (optional) <input name="end" type="date"></label><label>Remarks <input name="remarks"></label><button>Add Assignment</button></form></section>"""
-)
-EXCEPTIONS = """<!doctype html><title>Import exceptions</title><h1>Import exceptions</h1><a href="/">Inventory</a>
-<p>Rows the Drive import could not read, kept for review. The import runs with the <code>t6</code> command, not here.</p>
-{% if exceptions %}<table><thead><tr><th>Workbook</th><th>Sheet</th><th>Row</th><th>Reason</th><th>Detail</th></tr></thead><tbody>{% for x in exceptions %}<tr><td>{{ x.workbook }}</td><td>{{ x.sheet }}</td><td>{{ x.row }}</td><td>{{ x.reason }}</td><td>{{ x.detail }}</td></tr>{% endfor %}</tbody></table>{% else %}<p>No import exceptions.</p>{% endif %}"""
-OUTBOX = """<!doctype html><title>Outbox</title><h1>Outbox</h1><a href="/">Inventory</a>
-<p>Changes the t6 API could not take yet. Each is sent again, with its key, until the API answers; it is recorded once.</p>
-{% if entries %}<ul>{% for e in entries %}<li data-key="{{ e.key }}">{% if e.state == 'failed' %}Failed{% else %}Queued{% endif %}: {{ e.verb|replace('_', ' ') }} ({{ e.queued_at }}){% for name, value in e.inputs.items() %} {{ name }}={{ value }};{% endfor %}
-{% if e.state == 'failed' %}<p role="alert">The t6 API refused it: {{ e.reason }}</p><form method="post" action="/outbox/{{ e.key }}/dismiss"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="key" value="{{ new_key() }}"><button>Dismiss</button></form>{% endif %}</li>{% endfor %}</ul>{% else %}<p>Nothing is waiting.</p>{% endif %}"""
-UNAVAILABLE = '<!doctype html><title>Unavailable</title><h1>Unavailable</h1><p role="alert">The t6 API is unavailable. Nothing was lost; try again shortly.</p><a href="/">Inventory</a>'
-
 
 def create_app(
     client: Client, outbox: str, *, retry_interval: float = 5.0, allowed_host: str = ""
@@ -109,14 +71,11 @@ def create_app(
         if isinstance(error, HTTPException):
             return error
         if isinstance(error, ApiUnavailable):
-            return UNAVAILABLE, 503
+            return render_template("unavailable.html"), 503
         if isinstance(error, ApiRefused):
             if error.rule in ("drive", "shipment"):
                 return NotFound()
-            return render_template_string(
-                '<!doctype html><title>Refused</title><p role="alert">{{ reason }}</p><a href="/">Inventory</a>',
-                reason=error.reason,
-            ), 502
+            return render_template("refused.html", reason=error.reason), 502
         app.logger.error("Unexpected inventory error")
         return "Unexpected inventory error.", 500
 
@@ -171,8 +130,8 @@ def create_app(
             "status": status or None,
         }
         drives = gateway.read("drive_list", DriveListInput(**filters))["drives"]
-        return render_template_string(
-            INDEX,
+        return render_template(
+            "index.html",
             drives=drives,
             q=q,
             status=status,
@@ -209,8 +168,8 @@ def create_app(
         return session["csrf"]
 
     def form_page(drive_id: str | None, values: Mapping[str, Any], error: str | None = None) -> str:
-        return render_template_string(
-            FORM,
+        return render_template(
+            "drive_form.html",
             title="Edit Drive" if drive_id else "New Drive",
             editing=drive_id is not None,
             values=values,
@@ -274,8 +233,8 @@ def create_app(
             drive["ownership"], drive["owner_studio_id"]
         )
         display = gateway.project_display
-        return render_template_string(
-            DETAIL,
+        return render_template(
+            "drive.html",
             d=drive,
             assignments=found["assignments"],
             ownership=ownership,
@@ -283,7 +242,7 @@ def create_app(
             labels=LABELS,
             csrf=csrf(),
             new_key=new_key,
-            history=render_template_string(HISTORY, events=found["events"], display=display),
+            history=render_template("_history.html", events=found["events"], display=display),
             projects=gateway.projects(),
             display=display,
             roles=DRIVE_ROLES,
@@ -337,12 +296,12 @@ def create_app(
     @app.get("/exceptions")
     def exceptions():
         listed = gateway.read("drive_exceptions", DriveExceptionsInput())["exceptions"]
-        return render_template_string(EXCEPTIONS, exceptions=listed)
+        return render_template("exceptions.html", exceptions=listed)
 
     @app.get("/outbox")
     def show_outbox():
-        return render_template_string(
-            OUTBOX, entries=gateway.outbox.entries(), csrf=csrf(), new_key=new_key
+        return render_template(
+            "outbox.html", entries=gateway.outbox.entries(), csrf=csrf(), new_key=new_key
         )
 
     @app.post("/outbox/<key>/dismiss")

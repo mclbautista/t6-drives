@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+{% block title %}{{ title }}{% endblock %}
+{% macro field(name) -%}
+<div class="field"><label for="f-{{ name }}">{{ labels.get(name, name|capitalize) }}</label>
+{% if name == 'form_factor' %}<select id="f-{{ name }}" name="form_factor"><option value="">Unknown</option>{% for choice in ['portable', 'powered desktop'] %}<option value="{{ choice }}" {% if values.get(name) == choice %}selected{% endif %}>{{ choice }}</option>{% endfor %}</select>
+{% else %}<input id="f-{{ name }}" name="{{ name }}" value="{{ values.get(name) or '' }}">{% endif %}</div>
+{%- endmacro %}
+{% block content %}
+{% set groups = [
+  ("Identity", ["label", "description", "serial", "suspected_serial"]),
+  ("Hardware", ["brand", "model", "form_factor", "capacity_tb", "format"]),
+] %}
+{% set known = ["label", "description", "serial", "suspected_serial", "brand", "model", "form_factor", "capacity_tb", "format", "owner_studio_id", "purchase_date", "warranty", "review_note", "remarks"] %}
+<div class="page-head"><h1>{{ title }}</h1></div>
+{% if error %}<div class="banner"><p role="alert">{{ error }}</p></div>{% endif %}
+<div class="form-card">
+<form method="post">
+{% include "_hidden.html" %}
+{% if editing %}<input type="hidden" name="expected_version" value="{{ version }}">{% endif %}
+{% for legend, names in groups %}<fieldset><legend>{{ legend }}</legend><div class="fields">{% for name in names if name in fields %}{{ field(name) }}{% endfor %}</div></fieldset>
+{% endfor %}
+<fieldset><legend>Ownership and purchase</legend><div class="fields">
+<div class="field"><label for="ownership">Ownership</label> <select id="ownership" name="ownership">{% for choice, label in [("unknown", "Unknown ownership"), ("t6", "T6"), ("studio", "Studio")] %}<option value="{{ choice }}" {% if values.get("ownership", "unknown") == choice %}selected{% endif %}>{{ label }}</option>{% endfor %}</select></div>
+{% for name in ["owner_studio_id", "purchase_date", "warranty"] if name in fields %}{{ field(name) }}{% endfor %}
+</div></fieldset>
+<fieldset><legend>Review and notes</legend><div class="fields">
+<div class="field field--wide"><label class="check"><input type="checkbox" name="needs_review" {% if values.get('needs_review') %}checked{% endif %}> Needs review</label></div>
+{% for name in ["review_note", "remarks"] if name in fields %}{{ field(name) }}{% endfor %}
+</div></fieldset>
+{% set others = fields|reject("in", known)|list %}
+{% if others %}<fieldset><legend>Other</legend><div class="fields">{% for name in others %}{{ field(name) }}{% endfor %}</div></fieldset>{% endif %}
+<div class="form-actions"><button class="btn btn--primary">Save</button><a class="btn btn--quiet" href="{{ request.path[:-5] if editing else '/' }}">Cancel</a></div>
+</form>
+</div>
+{% endblock %}

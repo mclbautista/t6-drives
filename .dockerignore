@@ -9,3 +9,6 @@
 !custody.py
 !shipments.py
 !runtime.py
+!templates/
+!templates/*.html
+!templates/*.css

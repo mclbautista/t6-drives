@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+{% block title %}Release shipment{% endblock %}
+{% block content %}
+<div class="page-head"><h1>Release shipment</h1></div>
+<p class="lead">Events are recorded as the Person the t6 API authenticates.</p>
+{% if error %}<div class="banner"><p role="alert">{{ error }}</p></div>{% endif %}
+<div class="form-card">
+<form method="post">
+{% include "_hidden.html" %}
+<fieldset><legend>Select permanent Drive IDs for one handover</legend>
+<div class="checklist">{% for d in drives %}<label class="check"><input type="checkbox" name="drive_id" value="{{ d.id }}" {% if d.id in chosen %}checked{% endif %}><span><span class="mono">{{ d.id }}</span> — {{ d.label or d.description or 'Unknown label' }}</span></label>{% endfor %}{% if not drives %}<p class="muted pad">There are no Drives to release yet.</p>{% endif %}</div>
+</fieldset>
+<fieldset><legend>Handover</legend><div class="fields">
+<div class="field"><label for="f-on">Business date (blank = today)</label><input id="f-on" type="date" name="on" value="{{ form.get('on', '') }}"></div>
+<div class="field"><label for="f-project">Project</label><select id="f-project" name="project">{% for p in projects %}<option value="{{ p.t6_id }}"{% if form.get('project') == p.t6_id %} selected{% endif %}>{{ p.name }} — {{ p.project_code or 'unknown code' }} — {{ p.t6_id }}</option>{% endfor %}</select></div>
+<div class="field"><label for="f-party-kind">Existing party kind</label><select id="f-party-kind" name="party_kind"><option value="">Choose</option>{% for kind in ['contact', 'studio'] %}<option {% if form.get('party_kind') == kind %}selected{% endif %}>{{ kind }}</option>{% endfor %}</select></div>
+<div class="field"><label for="f-party">Party (page ID or name)</label><input id="f-party" name="party" value="{{ form.get('party', '') }}"></div>
+<div class="field field--wide"><label for="f-recipient">Recipient (who took the Drives, free text)</label><input id="f-recipient" name="recipient" value="{{ form.get('recipient', '') }}"></div>
+<div class="field field--wide"><label for="f-reason">Reason</label><input id="f-reason" name="reason" value="{{ form.get('reason', '') }}"></div>
+</div></fieldset>
+<div class="form-actions"><button class="btn btn--primary">Release selected Drives</button><a class="btn btn--quiet" href="/shipments">Cancel</a></div>
+</form>
+</div>
+{% endblock %}

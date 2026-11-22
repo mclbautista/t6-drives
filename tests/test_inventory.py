@@ -104,6 +104,57 @@ class InventoryTests(DriveAppCase):
         self.assertNotIn("<script>alert", html)
         self.assertIn("&lt;script&gt;", html)
 
+    def test_inventory_pages_drives_and_resets_page_on_filter_chips(self):
+        self.ids = [
+            self.api.add_drive(
+                label=f"Paged Drive {i:02d}",
+                needs_review=(i % 2 == 0),
+            )
+            for i in range(105)
+        ]
+        page1 = self.text("/")
+        self.assertIn("Showing 1&ndash;50 of 105 Drives", page1)
+        self.assertNotIn("matching filters", page1)
+        self.assertIn("Page 1 of 3", page1)
+        self.assertIn('href="/?page=2"', page1)
+        self.assertEqual(len(self.shown()), 50)
+        self.assertEqual(self.shown(), self.ids[:50])
+
+        page2 = self.text("/?page=2")
+        self.assertIn("Showing 51&ndash;100 of 105 Drives", page2)
+        self.assertNotIn("matching filters", page2)
+        self.assertIn("Page 2 of 3", page2)
+        self.assertIn('href="/"', page2)
+        self.assertIn('href="/?page=3"', page2)
+        self.assertEqual(self.shown("?page=2"), self.ids[50:100])
+        self.assertIn('href="/?review=yes"', page2)
+        self.assertNotIn("page=2&amp;review=yes", page2)
+
+        last = self.text("/?page=999")
+        self.assertIn("Showing 101&ndash;105 of 105 Drives", last)
+        self.assertIn("Page 3 of 3", last)
+        self.assertEqual(self.shown("?page=3"), self.ids[100:])
+
+        invalid = self.text("/?page=notanumber")
+        self.assertIn("Page 1 of 3", invalid)
+
+        filtered = self.text("/?review=yes&page=2")
+        self.assertIn("Showing 51&ndash;53 of 53 Drives matching filters", filtered)
+        self.assertIn("Page 2 of 2", filtered)
+        self.assertIn('href="/?review=yes"', filtered)
+
+    def test_project_list_is_cached_across_inventory_requests(self):
+        project = self.api.project("Synthetic cached")
+        drive = self.api.add_drive(label="Cached Drive")
+        self.api.assign(drive, project, "A1", "master")
+        self.api.requests.clear()
+        first = self.text("/")
+        second = self.text("/")
+        self.assertIn("Synthetic cached", first)
+        self.assertIn("Synthetic cached", second)
+        self.assertEqual(self.api.requests.count("/v1/project/list"), 1)
+        self.assertEqual(self.api.requests.count("/v1/drive/list"), 2)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -44,7 +44,7 @@ Check: open it from another office machine, which works; a request whose `Host` 
 | `/outbox` | writes waiting for the API, or refused by it |
 | `/health` | none (process readiness) |
 
-Who acts is the Person the API secret is bound to; the app sends no actor. Projects for the Assignment, custody and shipment forms and the inventory filter come from the API's project reads (kept 30 seconds in memory); only registered Projects can be chosen. A form carries an idempotency key made when it is rendered, so a double submit is one write.
+Who acts is the Person the API secret is bound to; the app sends no actor. Projects for the Assignment, custody and shipment forms and the inventory filter come from the API's project reads (kept 5 minutes in memory); only registered Projects can be chosen. A form carries an idempotency key made when it is rendered, so a double submit is one write.
 
 ## Checks
 

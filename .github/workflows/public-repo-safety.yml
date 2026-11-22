@@ -1,0 +1,11 @@
+name: Public repo safety
+on: [push, pull_request]
+permissions:
+  contents: read
+jobs:
+  safety:
+    uses: mclbautista/t6-core/.github/workflows/public-repo-safety.yml@main
+    with:
+      t6-core-ref: main
+    secrets:
+      T6_NAMES_DENYLIST: ${{ secrets.T6_NAMES_DENYLIST }}

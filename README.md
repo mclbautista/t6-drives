@@ -35,6 +35,8 @@ Check: open it from another office machine, which works; a request whose `Host` 
 | `/drive/<id>/edit` | `drive edit` (every fact; the form sends the Drive's `version` as `expected_version`, and a Drive that changed meanwhile is shown again) |
 | `/drive/<id>/promote` | `drive promote-serial` |
 | Assignments on the Drive page | `drive assign` (with remarks), `drive unassign` (by Assignment number, so one whose Project is text only can be ended) |
+| `/drive/<id>/qr`, `/qr/<code or id>` | `drive get`, `drive find` (a printable QR label of the Drive's code; scanning it opens the Drive) |
+| `/drive/<id>/catalog` | `drive catalog-snapshots`, `drive catalog-diff`, `drive catalog-at` (scans, what each changed, the contents on a date with `?on=YYYY-MM-DD`), and `drive catalog-snapshot` (upload a JSON manifest) |
 | `/drive/<id>/custody` | `drive receive`, `drive return`, `drive retire` |
 | `/shipments/new` | `drive release` (with a reason and a free-text recipient) |
 | `/shipments`, `/shipments/<id>` | `drive shipments`, `drive shipment` (the manifest shows the facts stored at release) |
@@ -50,15 +52,17 @@ Who acts is the Person the API secret is bound to; the app sends no actor. Proje
 uv pip install --python .venv/bin/python -r requirements-dev.lock
 .venv/bin/python -m playwright install chromium
 .venv/bin/python -m unittest discover -s tests -v
-.venv/bin/python -m compileall -q app.py gateway.py forms.py outbox.py custody.py shipments.py runtime.py tools tests
+.venv/bin/python -m compileall -q app.py gateway.py forms.py outbox.py custody.py catalog.py shipments.py runtime.py tools tests
 .venv/bin/mypy
-.venv/bin/ruff check app.py gateway.py forms.py outbox.py custody.py shipments.py runtime.py tools tests
-.venv/bin/ruff format --check app.py gateway.py forms.py outbox.py custody.py shipments.py runtime.py tools tests
+.venv/bin/ruff check app.py gateway.py forms.py outbox.py custody.py catalog.py shipments.py runtime.py tools tests
+.venv/bin/ruff format --check app.py gateway.py forms.py outbox.py custody.py catalog.py shipments.py runtime.py tools tests
 .venv/bin/python -m build
 ```
 
 The tests serve t6's real `VerbAPI` on a temporary database (`tests/support.py`); nothing is faked. The API side needs `httpx`, `PyYAML` and `openpyxl`, which are development dependencies only. If Chromium is installed elsewhere, set `DRIVES_CHROMIUM` to its path.
 
 t6 is pinned to release tag `v0.6.2`; `requirements.lock` pins the exact commit.
+
+A scan manifest of about 8,000 files is 1 to 2 MB, so only `POST /drive/<id>/catalog` accepts a body up to 12 MB (every other form stays at 64 KB, and the Host, Origin and CSRF checks run first). A scan the API cannot take is not queued, because the Outbox page would print the whole manifest; the page says the API is unavailable, and uploading again is the same write. The app waits up to 60 seconds for the API to save a scan. The t6 API accepts that large request on its tailnet listener only.
 
 A refusal for a step that cannot follow the last custody step (rule `custody`), or for an edit of a Drive that changed (`drive_changed`), is answered 409 and shown to the person; it is never queued or sent again.

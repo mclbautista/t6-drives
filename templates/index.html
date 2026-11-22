@@ -8,7 +8,6 @@
 {% block content %}
 {% set current = request.args.get("status", "") %}
 {% set reviewing = request.args.get("review", "") %}
-{% set filtered = request.args.values()|select|list|length > 0 %}
 <div class="page-head">
 <h1>Inventory</h1>
 <div class="actions"><a class="btn" href="/new">New Drive</a></div>
@@ -24,11 +23,11 @@
 </form>
 <div class="toolbar">
 <div class="chips" role="group" aria-label="Quick filters">
-<a class="chip chip--filter" href="{{ href({'status': ''}) }}"{% if not current %} aria-current="true"{% endif %}>All</a>
-{% for choice in ["unknown", "in custody", "released", "retired"] %}<a class="chip chip--filter" href="{{ href({'status': choice}) }}"{% if current == choice %} aria-current="true"{% endif %}>{{ choice }}</a>{% endfor %}
-<a class="chip chip--filter chip--filter-review" href="{{ href({'review': '' if reviewing == 'yes' else 'yes'}) }}"{% if reviewing == "yes" %} aria-current="true"{% endif %}>Needs review</a>
+<a class="chip chip--filter" href="{{ href({'status': '', 'page': ''}) }}"{% if not current %} aria-current="true"{% endif %}>All</a>
+{% for choice in ["unknown", "in custody", "released", "retired"] %}<a class="chip chip--filter" href="{{ href({'status': choice, 'page': ''}) }}"{% if current == choice %} aria-current="true"{% endif %}>{{ choice }}</a>{% endfor %}
+<a class="chip chip--filter chip--filter-review" href="{{ href({'review': '' if reviewing == 'yes' else 'yes', 'page': ''}) }}"{% if reviewing == "yes" %} aria-current="true"{% endif %}>Needs review</a>
 </div>
-<p class="count">{{ drives|length }} Drive{{ '' if drives|length == 1 else 's' }}{% if filtered %} shown{% endif %}</p>
+<p class="count">{% if total_pages > 1 %}Showing {{ start_index }}&ndash;{{ end_index }} of {{ total_drives }} Drives{% if filtered %} matching filters{% endif %}{% else %}{{ total_drives }} Drive{{ '' if total_drives == 1 else 's' }}{% if filtered %} shown{% endif %}{% endif %}</p>
 </div>
 {% if drives %}
 <div class="table-card">
@@ -40,6 +39,13 @@
 <div class="c-use"><span class="cell-label" aria-hidden="true">Open Project use</span>{% if d.open_assignments %}<span class="vh">Open Project use: </span>{% for a in d.open_assignments %}<span class="use"><span class="use-project">{{ display(a.project) }}</span> <span class="muted">({{ a.label or 'no label' }}, {{ a.role or 'unknown role' }}, from {{ a.start or 'unknown date' }})</span></span>{% endfor %}{% else %}<span class="muted"><span class="vh">Open Project use: none</span><span aria-hidden="true">None</span></span>{% endif %}</div>
 </li>{% endfor %}</ul>
 </div>
+{% if total_pages > 1 %}
+<nav class="pager" aria-label="Inventory pages">
+{% if page > 1 %}<a class="btn" href="{{ href({'page': '' if page == 2 else (page - 1)|string}) }}">Previous</a>{% else %}<span class="btn is-disabled" aria-disabled="true">Previous</span>{% endif %}
+<span class="pager-info muted">Page {{ page }} of {{ total_pages }}</span>
+{% if page < total_pages %}<a class="btn" href="{{ href({'page': (page + 1)|string}) }}">Next</a>{% else %}<span class="btn is-disabled" aria-disabled="true">Next</span>{% endif %}
+</nav>
+{% endif %}
 {% else %}
 <div class="card empty">
 <p class="empty-title">{% if filtered %}No Drives match these filters.{% else %}No Drives yet.{% endif %}</p>

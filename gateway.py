@@ -2,6 +2,7 @@
 
 import copy
 import logging
+import threading
 import time
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -31,7 +32,7 @@ from t6.verbs import (
 from outbox import Outbox
 
 log = logging.getLogger("drives.gateway")
-PROJECT_SECONDS = 30.0
+PROJECT_SECONDS = 300.0
 WRITES: dict[str, type[BaseModel]] = {
     "drive_add": DriveAddInput,
     "drive_edit": DriveEditInput,
@@ -101,7 +102,8 @@ class Gateway:
         self._slow = copy.copy(client)
         self._slow.timeout = max(client.timeout, SLOW_SECONDS)
         self._tried = time.monotonic()
-        self._projects: tuple[float, list[dict[str, Any]]] | None = None
+        self._projects_lock = threading.Lock()
+        self._projects: tuple[float, list[dict[str, Any]], dict[str, dict[str, Any]]] | None = None
 
     def read(self, method: str, inputs: BaseModel) -> dict[str, Any]:
         outcome = call(self.client, method, inputs)
@@ -116,14 +118,20 @@ class Gateway:
             )
         return dict(outcome.result)
 
-    def projects(self) -> list[dict[str, Any]]:
-        """Registered Projects only, for a short while: a Drive is tied to a T6 Project ID."""
+    def _project_cache(self) -> tuple[list[dict[str, Any]], dict[str, dict[str, Any]]]:
         from t6.verbs import ProjectListInput
 
-        if self._projects is None or time.monotonic() - self._projects[0] > PROJECT_SECONDS:
-            listed = self.read("project_list", ProjectListInput())["projects"]
-            self._projects = (time.monotonic(), [p for p in listed if p.get("t6_id")])
-        return self._projects[1]
+        with self._projects_lock:
+            if self._projects is None or time.monotonic() - self._projects[0] > PROJECT_SECONDS:
+                listed = self.read("project_list", ProjectListInput())["projects"]
+                registered = [p for p in listed if p.get("t6_id")]
+                by_id = {p["t6_id"]: p for p in registered}
+                self._projects = (time.monotonic(), registered, by_id)
+            return self._projects[1], self._projects[2]
+
+    def projects(self) -> list[dict[str, Any]]:
+        """Registered Projects only, for a short while: a Drive is tied to a T6 Project ID."""
+        return self._project_cache()[0]
 
     def project_display(self, ref: Mapping[str, Any] | None) -> str:
         """A Project reference as the screens show it: its name from the API, or the text an import left."""
@@ -131,7 +139,7 @@ class Gateway:
             return "Unknown Project"
         if ref["text"] is not None:
             return "Unresolved: " + ref["text"]
-        found = next((p for p in self.projects() if p["t6_id"] == ref["page_id"]), None)
+        found = self._project_cache()[1].get(ref["page_id"])
         if found is None:
             return "Project " + ref["page_id"]
         return f"{found['name']} (code: {found['project_code'] or 'unknown'}; T6 Project ID: {found['t6_id']})"

@@ -109,6 +109,9 @@ main:focus { outline: none; }
 .toolbar { display: flex; align-items: center; justify-content: space-between; gap: var(--s3); flex-wrap: wrap; margin: var(--s4) 0 var(--s3); }
 .chips { display: flex; gap: var(--s2); flex-wrap: wrap; }
 .count { margin: 0; color: var(--muted); font-size: 0.8125rem; }
+.btn.is-disabled { opacity: 0.45; cursor: default; pointer-events: none; }
+.pager { display: flex; align-items: center; justify-content: space-between; gap: var(--s3); flex-wrap: wrap; margin: calc(-1 * var(--s2)) 0 var(--s5); }
+.pager-info { font-size: 0.875rem; }
 
 /* Cards, banners, empty states */
 .card, .form-card, .table-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); }

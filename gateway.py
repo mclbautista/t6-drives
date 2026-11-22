@@ -1,5 +1,6 @@
 """The one place this app talks to the t6 API: typed reads, and writes that wait in the outbox when the API is down."""
 
+import copy
 import logging
 import time
 from collections.abc import Mapping
@@ -13,6 +14,7 @@ from t6.verbs import (
     Done,
     DriveAddInput,
     DriveAssignInput,
+    DriveCatalogSnapshotInput,
     DriveEditInput,
     DrivePromoteSerialInput,
     DriveReceiveInput,
@@ -40,7 +42,12 @@ WRITES: dict[str, type[BaseModel]] = {
     "drive_return": DriveReturnInput,
     "drive_retire": DriveRetireInput,
     "drive_release": DriveReleaseInput,
+    "drive_catalog_snapshot": DriveCatalogSnapshotInput,
 }
+# A scan carries its whole manifest, which the Outbox page would print and rewrite on every change, so a scan the API
+# cannot take is not queued: the custodian uploads it again, and the same form key keeps it one write.
+NOT_QUEUED = {"drive_catalog_snapshot"}
+SLOW_SECONDS = 60.0  # saving a scan of thousands of files takes the API longer than a form edit
 
 
 @dataclass(frozen=True)
@@ -91,6 +98,8 @@ def describe(outcome: Outcome) -> str:
 class Gateway:
     def __init__(self, client: Client, outbox: Outbox, retry_interval: float) -> None:
         self.client, self.outbox, self.retry_interval = client, outbox, retry_interval
+        self._slow = copy.copy(client)
+        self._slow.timeout = max(client.timeout, SLOW_SECONDS)
         self._tried = time.monotonic()
         self._projects: tuple[float, list[dict[str, Any]]] | None = None
 
@@ -130,10 +139,11 @@ class Gateway:
     def _send(self, method: str, values: dict[str, Any], key: str) -> Outcome | Unavailable:
         """The verb's preview, then its confirm, both under `key`: sending it again is the same write."""
         model = WRITES[method]
-        outcome = call(self.client, method, model(**values, idempotency_key=key))
+        client = self._slow if method in NOT_QUEUED else self.client
+        outcome = call(client, method, model(**values, idempotency_key=key))
         if isinstance(outcome, Preview):
             outcome = call(
-                self.client, method, model(**values, idempotency_key=key, confirm=outcome.token)
+                client, method, model(**values, idempotency_key=key, confirm=outcome.token)
             )
         return outcome
 
@@ -144,6 +154,8 @@ class Gateway:
         except ValidationError:
             return Refused(rule="input", reason="Check the values entered.")
         outcome = self._send(method, values, key)
+        if isinstance(outcome, Unavailable) and method in NOT_QUEUED:
+            raise ApiUnavailable
         if isinstance(outcome, Unavailable):
             self.outbox.add(method, values, key)
             self._tried = time.monotonic()

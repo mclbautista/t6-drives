@@ -12,6 +12,7 @@ from t6.verbs import DriveExceptionsInput, DriveGetInput, DriveListInput, Refuse
 from t6.vocabulary import DRIVE_ROLES
 from werkzeug.exceptions import HTTPException, NotFound
 
+from catalog import allow_manifest, register_catalog
 from custody import register_custody
 from forms import finish, new_key, notice, posted_key
 from gateway import ApiRefused, ApiUnavailable, Gateway
@@ -34,6 +35,8 @@ ADD_FIELDS = (
     "purchase_date",
     "warranty",
     "remarks",
+    "office_location",
+    "qr_code",
 )
 LABELS = {
     "serial": "Accepted serial",
@@ -44,6 +47,8 @@ LABELS = {
     "owner_studio_id": "Owner Studio ID (existing reference only)",
     "purchase_date": "Purchase date",
     "review_note": "Review note",
+    "office_location": "Office location",
+    "qr_code": "QR code",
 }
 
 
@@ -98,6 +103,9 @@ def create_app(
         ):
             abort(400)
         if request.method not in ("GET", "HEAD", "OPTIONS"):
+            allow_manifest(
+                request.path
+            )  # before the form is read: only the scan upload may be large
             origin = request.headers.get("Origin")
             if origin is not None and origin != request.host_url.rstrip("/"):
                 abort(403)
@@ -128,6 +136,7 @@ def create_app(
             "needs_review": {"yes": True, "no": False}.get(review),
             "project": project or None,
             "status": status or None,
+            "office_location": request.args.get("office_location", "").strip() or None,
         }
         drives = gateway.read("drive_list", DriveListInput(**filters))["drives"]
         return render_template(
@@ -291,6 +300,7 @@ def create_app(
         )
 
     register_custody(app, gateway, csrf)
+    register_catalog(app, gateway, csrf)
     register_shipments(app, gateway, csrf)
 
     @app.get("/exceptions")

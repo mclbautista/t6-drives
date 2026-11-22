@@ -24,7 +24,7 @@ from t6.privacy import Person, Registry
 from t6.registry import Registered
 from t6.registry.sqlite import SqliteProjectRegistry
 from t6.server.app import Request, Response
-from t6.server.http import make_server
+from t6.server.http import CATALOG_BODY_BYTES, CATALOG_SNAPSHOT_PATH, make_server
 from t6.server.queue import JobQueue
 from t6.server.verbs import VerbAPI
 from t6.verbs import Done, Preview
@@ -91,7 +91,13 @@ class SyntheticAPI:
         return Response(503, {"error": "lost"}) if lost else response
 
     def start(self) -> None:
-        self.server = server = make_server(("127.0.0.1", self.port), self.handle)
+        self.server = server = make_server(
+            ("127.0.0.1", self.port),
+            self.handle,
+            body_limits={
+                CATALOG_SNAPSHOT_PATH: CATALOG_BODY_BYTES
+            },  # as the t6 tailnet listener does
+        )
         self.port = server.server_port
         self.thread = threading.Thread(target=server.serve_forever, daemon=True)
         self.thread.start()
@@ -193,6 +199,20 @@ class SyntheticAPI:
         from t6.verbs import DriveEditInput
 
         self.write("drive_edit", DriveEditInput, drive=drive, **facts)
+
+    def scan(
+        self, drive: str, on: str, entries: list[dict[str, Any]], root_path: str = "Volume"
+    ) -> None:
+        from t6.verbs import DriveCatalogSnapshotInput
+
+        self.write(
+            "drive_catalog_snapshot",
+            DriveCatalogSnapshotInput,
+            drive=drive,
+            captured_on=on,
+            root_path=root_path,
+            entries=entries,
+        )
 
     def legacy_shipment(self, drive: str, project: str, shipment: str) -> None:
         """A release recorded as the workbook import does it: with a shipment, and no facts kept for it."""

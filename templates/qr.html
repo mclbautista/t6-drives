@@ -1,0 +1,19 @@
+{% extends "base.html" %}
+{% block title %}QR label {{ d.id }}{% endblock %}
+{% block content %}
+<div class="page-head"><h1>QR label</h1><div class="actions"><a class="btn" href="/drive/{{ d.id }}">Back to Drive</a></div></div>
+{% if picture %}
+<section class="qr-label card" aria-label="Printable label">
+<div class="qr-picture">{{ picture|safe }}</div>
+<div class="qr-text">
+<p class="qr-code mono">{{ d.qr_code }}</p>
+{% if d.label %}<p><strong>{{ d.label }}</strong></p>{% endif %}
+{% if d.serial %}<p class="mono">{{ d.serial }}</p>{% endif %}
+{% if d.office_location %}<p>{{ d.office_location }}</p>{% endif %}
+</div>
+</section>
+<p class="muted no-print">Print this page from the browser. Scanning the label opens this Drive.</p>
+{% else %}
+<div class="card empty"><p class="empty-title">This Drive has no QR code yet.</p><p class="muted">Add one on the edit page, then come back to print the label.</p><a class="btn btn--primary" href="/drive/{{ d.id }}/edit">Edit Drive</a></div>
+{% endif %}
+{% endblock %}

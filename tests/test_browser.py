@@ -1,5 +1,6 @@
 """Real Chromium against a loopback HTTP server and the test API."""
 
+import json
 import logging
 import os
 import threading
@@ -8,6 +9,19 @@ import unittest
 from playwright.sync_api import expect, sync_playwright
 from support import DriveAppCase
 from werkzeug.serving import WSGIRequestHandler, make_server
+
+FIRST_SCAN = [
+    {"path": "Show A", "kind": "dir"},
+    {"path": "Show A/clip1.mov", "kind": "file", "size_bytes": 100},
+    {"path": "Show A/clip2.mov", "kind": "file", "size_bytes": 200},
+    {"path": "notes.txt", "kind": "file", "size_bytes": 5},
+]
+SECOND_SCAN = [
+    {"path": "Show A", "kind": "dir"},
+    {"path": "Show A/clip1.mov", "kind": "file", "size_bytes": 100},
+    {"path": "Show A/clip2.mov", "kind": "file", "size_bytes": 250},
+    {"path": "Show A/clip3.mov", "kind": "file", "size_bytes": 300},
+]
 
 
 class QuietHandler(WSGIRequestHandler):
@@ -101,6 +115,60 @@ class BrowserTest(DriveAppCase):
         page.get_by_label("Status", exact=True).select_option("retired")
         page.get_by_role("button", name="Find", exact=True).click()
         expect(page.get_by_text("synthetic corrected label", exact=False)).to_be_visible()
+
+    def test_qr_label_scan_lookup_and_dated_catalog(self):
+        page = self.page
+        page.goto(self.base + "/new")
+        page.get_by_label("Label", exact=True).fill("Synthetic shelf drive")
+        page.get_by_label("Office location", exact=True).fill("Office A / Shelf 1")
+        page.get_by_label("QR code", exact=True).fill("shelf-1")
+        page.get_by_role("button", name="Save", exact=True).click()
+        expect(page.get_by_text("Office A / Shelf 1", exact=True)).to_be_visible()
+        expect(page.get_by_text("SHELF-1", exact=True)).to_be_visible()
+        drive_id = page.url.rsplit("/", 1)[-1]
+        page.get_by_role("link", name="QR label", exact=True).click()
+        expect(page.locator(".qr-picture svg")).to_be_visible()
+        expect(page.get_by_text("SHELF-1", exact=True)).to_be_visible()
+        page.goto(self.base + "/qr/shelf-1")  # what scanning the printed label opens
+        self.assertTrue(page.url.endswith("/drive/" + drive_id))
+        page.goto(self.base + "/")
+        page.get_by_label("Office location", exact=True).fill("shelf 1")
+        page.get_by_role("button", name="Find", exact=True).click()
+        expect(page.get_by_role("link", name=drive_id, exact=True)).to_be_visible()
+
+        page.goto(f"{self.base}/drive/{drive_id}")
+        page.get_by_role("link", name="Contents", exact=True).click()
+        expect(page.get_by_text("No scans yet")).to_be_visible()
+        for day, entries in (
+            ("2026-03-01", FIRST_SCAN),
+            ("2026-03-10", SECOND_SCAN),
+        ):
+            page.get_by_label("Scan date", exact=True).fill(day)
+            page.get_by_label("Manifest file", exact=True).set_input_files(
+                {
+                    "name": "scan.json",
+                    "mimeType": "application/json",
+                    "buffer": json.dumps(entries).encode(),
+                }
+            )
+            page.get_by_role("button", name="Save scan", exact=True).click()
+        expect(page.locator("li[data-snapshot-id]")).to_have_count(2)
+        page.locator("li[data-snapshot-id]").first.get_by_role("link", name="What changed").click()
+        expect(
+            page.get_by_role("heading", name="Changed by the scan of 2026-03-10")
+        ).to_be_visible()
+        expect(page.locator("tr.change--added")).to_have_count(1)
+        expect(page.locator("tr.change--modified")).to_have_count(1)
+        expect(page.locator("tr.change--removed")).to_have_count(1)
+        page.get_by_label("Date", exact=True).fill("2026-03-05")
+        page.get_by_role("button", name="Show contents", exact=True).click()
+        expect(page.get_by_text("From the scan of 2026-03-01", exact=False)).to_be_visible()
+        expect(page.get_by_role("cell", name="notes.txt", exact=True)).to_be_visible()
+        expect(page.get_by_role("cell", name="Show A/clip3.mov", exact=True)).to_have_count(0)
+        page.get_by_label("Date", exact=True).fill("2026-04-01")
+        page.get_by_role("button", name="Show contents", exact=True).click()
+        expect(page.get_by_role("cell", name="Show A/clip3.mov", exact=True)).to_be_visible()
+        expect(page.get_by_role("cell", name="notes.txt", exact=True)).to_have_count(0)
 
     def test_release_shipment_manifest_and_print_button(self):
         project = self.api.project("Synthetic show")

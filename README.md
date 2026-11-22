@@ -61,7 +61,7 @@ uv pip install --python .venv/bin/python -r requirements-dev.lock
 
 The tests serve t6's real `VerbAPI` on a temporary database (`tests/support.py`); nothing is faked. The API side needs `httpx`, `PyYAML` and `openpyxl`, which are development dependencies only. If Chromium is installed elsewhere, set `DRIVES_CHROMIUM` to its path.
 
-t6 is pinned to release tag `v0.6.2`; `requirements.lock` pins the exact commit.
+t6 is pinned to release tag `v0.6.15`; `requirements.lock` pins the exact commit.
 
 A scan manifest of about 8,000 files is 1 to 2 MB, so only `POST /drive/<id>/catalog` accepts a body up to 12 MB (every other form stays at 64 KB, and the Host, Origin and CSRF checks run first). A scan the API cannot take is not queued, because the Outbox page would print the whole manifest; the page says the API is unavailable, and uploading again is the same write. The app waits up to 60 seconds for the API to save a scan. The t6 API accepts that large request on its tailnet listener only.
 

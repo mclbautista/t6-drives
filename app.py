@@ -150,14 +150,22 @@ def create_app(
             "drive_list", DriveListInput(**filters, limit=PAGE_SIZE, offset=start)
         )
         drives = listed["drives"]
-        total_drives = listed.get("total", len(drives))
-        total_pages = max(1, math.ceil(total_drives / PAGE_SIZE))
-        if page > total_pages:
-            page = total_pages
+        if "total" not in listed:
+            # An API older than t6 0.6.22 ignores limit and offset and returns every Drive.
+            total_drives = len(drives)
+            total_pages = max(1, math.ceil(total_drives / PAGE_SIZE))
+            page = min(page, total_pages)
             start = (page - 1) * PAGE_SIZE
-            drives = gateway.read(
-                "drive_list", DriveListInput(**filters, limit=PAGE_SIZE, offset=start)
-            )["drives"]
+            drives = drives[start : start + PAGE_SIZE]
+        else:
+            total_drives = listed["total"]
+            total_pages = max(1, math.ceil(total_drives / PAGE_SIZE))
+            if page > total_pages:
+                page = total_pages
+                start = (page - 1) * PAGE_SIZE
+                drives = gateway.read(
+                    "drive_list", DriveListInput(**filters, limit=PAGE_SIZE, offset=start)
+                )["drives"]
         start_index = start + 1 if drives else 0
         end_index = start + len(drives)
         return render_template(

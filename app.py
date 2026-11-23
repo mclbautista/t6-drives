@@ -141,16 +141,23 @@ def create_app(
             "office_location": request.args.get("office_location", "").strip() or None,
         }
         filtered = any(value is not None for value in filters.values())
-        all_drives = gateway.read("drive_list", DriveListInput(**filters))["drives"]
-        total_drives = len(all_drives)
-        total_pages = max(1, math.ceil(total_drives / PAGE_SIZE))
         raw_page = request.args.get("page", "").strip()
         page = (
             int(raw_page) if raw_page.isascii() and raw_page.isdigit() and int(raw_page) >= 1 else 1
         )
-        page = min(page, total_pages)
         start = (page - 1) * PAGE_SIZE
-        drives = all_drives[start : start + PAGE_SIZE]
+        listed = gateway.read(
+            "drive_list", DriveListInput(**filters, limit=PAGE_SIZE, offset=start)
+        )
+        drives = listed["drives"]
+        total_drives = listed.get("total", len(drives))
+        total_pages = max(1, math.ceil(total_drives / PAGE_SIZE))
+        if page > total_pages:
+            page = total_pages
+            start = (page - 1) * PAGE_SIZE
+            drives = gateway.read(
+                "drive_list", DriveListInput(**filters, limit=PAGE_SIZE, offset=start)
+            )["drives"]
         start_index = start + 1 if drives else 0
         end_index = start + len(drives)
         return render_template(

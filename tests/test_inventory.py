@@ -155,6 +155,25 @@ class InventoryTests(DriveAppCase):
         self.assertEqual(self.api.requests.count("/v1/project/list"), 1)
         self.assertEqual(self.api.requests.count("/v1/drive/list"), 2)
 
+    def test_inventory_requests_only_the_current_page_from_the_api(self):
+        import json
+        from unittest.mock import patch
+
+        for i in range(55):
+            self.api.add_drive(label=f"Paged API {i:02d}")
+        seen: list[dict[str, object]] = []
+        original = self.api.api
+
+        def capture(request):
+            if request.path == "/v1/drive/list":
+                seen.append(json.loads(request.body or b"{}"))
+            return original(request)
+
+        with patch.object(self.api, "api", side_effect=capture):
+            self.text("/")
+            self.text("/?page=2")
+        self.assertEqual(seen, [{"limit": 50, "offset": 0}, {"limit": 50, "offset": 50}])
+
 
 if __name__ == "__main__":
     unittest.main()

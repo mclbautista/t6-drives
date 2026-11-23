@@ -155,6 +155,58 @@ class InventoryTests(DriveAppCase):
         self.assertEqual(self.api.requests.count("/v1/project/list"), 1)
         self.assertEqual(self.api.requests.count("/v1/drive/list"), 2)
 
+    def test_inventory_requests_only_the_current_page_from_the_api(self):
+        import json
+        from unittest.mock import patch
+
+        for i in range(55):
+            self.api.add_drive(label=f"Paged API {i:02d}")
+        seen: list[dict[str, object]] = []
+        original = self.api.api
+
+        def capture(request):
+            if request.path == "/v1/drive/list":
+                seen.append(json.loads(request.body or b"{}"))
+            return original(request)
+
+        with patch.object(self.api, "api", side_effect=capture):
+            self.text("/")
+            self.text("/?page=2")
+        self.assertEqual(seen, [{"limit": 50, "offset": 0}, {"limit": 50, "offset": 50}])
+
+    def test_inventory_pages_locally_when_the_api_ignores_limit_and_offset(self):
+        import dataclasses
+        import json
+        from unittest.mock import patch
+
+        from t6.server.app import Response
+
+        self.ids = [self.api.add_drive(label=f"Old API {i:02d}") for i in range(55)]
+        original = self.api.api
+
+        def old_api(request):
+            # An API before t6 0.6.22: no paging fields in, no total out.
+            if request.path != "/v1/drive/list":
+                return original(request)
+            inputs = {
+                k: v
+                for k, v in json.loads(request.body or b"{}").items()
+                if k not in ("limit", "offset")
+            }
+            response = original(dataclasses.replace(request, body=json.dumps(inputs).encode()))
+            body = json.loads(json.dumps(response.body))
+            body.get("result", {}).pop("total", None)
+            return Response(response.status, body)
+
+        with patch.object(self.api, "api", side_effect=old_api):
+            first = self.shown()
+            second = self.shown("?page=2")
+            clamped = self.text("/?page=999")
+        self.assertEqual(first, self.ids[:50])
+        self.assertEqual(second, self.ids[50:])
+        self.assertIn("Page 2 of", clamped)
+        self.assertNotIn("Page 999", clamped)
+
 
 if __name__ == "__main__":
     unittest.main()

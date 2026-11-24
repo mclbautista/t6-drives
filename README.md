@@ -48,6 +48,7 @@ Check: open it from another office machine, which works; a request whose `Host` 
 | `/drive/<id>/place` | `drive edit` (place TABLE, CABINET, SHELF, BOX or none, and T6 ownership; the search line shows both) |
 | `/exceptions` | `drive capture list` (unresolved captures with text and photo), `drive capture photo`, `drive capture` with a Drive, `movement list` (needs a Project) and `movement correct` (set it), `drive overdue`, `drive reload report` (unmapped Project names), `drive exceptions` (rows the reload could not load) |
 | `/captures/<id>/photo`, `/captures/<id>/drive` | `drive capture photo`, `drive list` and `drive capture` (pick a Drive for an unresolved capture) |
+| `/movements/<id>`, `/movements/<id>/photo`, `/movements/<id>/photo/delete` | `movement list`, `movement photo-get`, `movement photo-add` (add or replace), `movement photo-delete` (the API lets only the drive custodian or an operator delete) |
 | `/outbox` | "Waiting to send": writes waiting for the API, or refused by it |
 | `/health` | none (process readiness) |
 
@@ -81,6 +82,8 @@ Every rendered page uses the API's practice flag for its practice banner; no fla
 the API is unavailable.
 
 A capture photo is read from the API for each request and passed on to the browser with `Cache-Control: no-store`; the app never writes it to disk or logs it, and sends it nowhere else. Like every page, it is open to anyone who can reach the app on the office network.
+
+A movement photo is optional: one per movement, JPEG, PNG or WebP up to 10 MB, added on the movement page or with a correction (a photo with no other change goes on the entry itself). The app checks the type from the file's first bytes and the size, then sends it straight to `movement photo-add`; it never stores it, and an upload the API cannot take is not queued, because the list of writes waiting to be sent shows every value. Only the forms that carry a photo accept a request larger than 64 KB. The API keeps the files in `T6_DRIVE_PHOTO_DIR` and refuses a delete unless the app's key belongs to `T6_DRIVE_CUSTODIAN_PERSON_ID` or an operator.
 
 Search sends the typed text to `drive list`, which matches label, serial and Project code; each result line shows the status, `place` and `holder` the API returns, and nothing is derived in the app.
 

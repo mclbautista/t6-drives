@@ -149,6 +149,7 @@ class PlainPageCase(DriveAppCase):
             "/movements",
             f"/movements?drive={self.moved}",
             f"/movements/{self.movement}/correct",
+            f"/movements/{self.movement}",
             "/exceptions",
             f"/captures/{self.capture}/drive",
             drive,

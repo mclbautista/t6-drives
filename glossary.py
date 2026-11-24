@@ -54,6 +54,8 @@ VERB_WORDS = {
     "drive_catalog_snapshot": "Scan of a Drive",
     "movement_correct": "Correction of a " + MOVEMENT,
     "drive_capture": "Photo given a Drive",
+    "movement_photo_add": "Photo of a " + MOVEMENT,
+    "movement_photo_delete": "Photo of a " + MOVEMENT + " deleted",
 }
 
 # An internal ID: it may sit in a link or a form value, never in what a person reads.

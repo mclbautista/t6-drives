@@ -26,6 +26,8 @@ from t6.verbs import (
     DriveReturnInput,
     DriveUnassignInput,
     MovementCorrectInput,
+    MovementPhotoAddInput,
+    MovementPhotoRefInput,
     NeedsPerson,
     Outcome,
     Preview,
@@ -51,10 +53,14 @@ WRITES: dict[str, type[BaseModel]] = {
     "movement_correct": MovementCorrectInput,
     # Giving an unresolved capture a Drive has no preview: the API answers done at once, and the same call is the same write.
     "drive_capture": DriveCaptureInput,
+    # A movement photo has no preview either: one call adds, replaces or deletes it.
+    "movement_photo_add": MovementPhotoAddInput,
+    "movement_photo_delete": MovementPhotoRefInput,
 }
 # A scan carries its whole manifest, which the Outbox page would print and rewrite on every change, so a scan the API
 # cannot take is not queued: the custodian uploads it again, and the same form key keeps it one write.
-NOT_QUEUED = {"drive_catalog_snapshot"}
+# A photo is the same: the custodian adds it again when the API is back.
+NOT_QUEUED = {"drive_catalog_snapshot", "movement_photo_add", "movement_photo_delete"}
 SLOW_SECONDS = 60.0  # saving a scan of thousands of files takes the API longer than a form edit
 
 

@@ -4,7 +4,7 @@ import re
 from urllib.parse import urlencode
 
 from support import DriveAppCase
-from t6.verbs import Done, DriveListInput, DriveReleaseInput, Preview, ProjectListInput
+from t6.verbs import DriveListInput, DriveReleaseInput, ProjectListInput
 
 
 class SearchTests(DriveAppCase):
@@ -78,8 +78,7 @@ class SearchTests(DriveAppCase):
         self.assertEqual(self.only_drive()["serial"], "SYN-NEW-SERIAL")
 
     def test_practice_banner_follows_the_api_on_every_page(self):
-        from openpyxl import Workbook  # type: ignore[import-untyped]
-        from t6.verbs import DriveCutoverInput
+        from t6.drives.practice import apply_live_setting
 
         banner = "Practice: records are wiped at the next reload"
         drive = self.api.add_drive(label="Synthetic practice drive")
@@ -97,26 +96,10 @@ class SearchTests(DriveAppCase):
         ]
         for url in pages:
             self.assertIn(banner, self.text(url), url)
-        workbook = Workbook()
-        sheet = workbook.active
-        assert sheet is not None
-        sheet.title = "Synthetic practice project"
-        sheet.append(["HARD DRIVE LABEL", "SERIAL NUMBER"])
-        sheet.append(["Synthetic final drive", "SYN-FINAL"])
-        path = self.directory + "/synthetic.xlsx"
-        workbook.save(path)
-        from t6.client import Client
-
-        client = Client(self.api.url, "synthetic-operator-secret")
-        preview = client.drive_cutover(DriveCutoverInput(workbook=path, idempotency_key="cutover"))
-        self.assertIsInstance(preview, Preview)
-        assert isinstance(preview, Preview)
-        done = client.drive_cutover(
-            DriveCutoverInput(workbook=path, idempotency_key="cutover", confirm=preview.token)
-        )
-        self.assertIsInstance(done, Done)
+        # Going live is the T6_DRIVE_LIVE setting read when the API starts (t6 ADR 0010).
+        apply_live_setting(self.api.registry, {"T6_DRIVE_LIVE": "true"})
         self.assertFalse(self.api.read("drive_list", DriveListInput)["practice"])
-        final_drive = self.only_drive()["id"]
+        final_drive = drive
         for url in (
             "/",
             "/new",

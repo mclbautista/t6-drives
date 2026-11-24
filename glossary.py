@@ -14,6 +14,7 @@ SERIAL_TO_CHECK = "serial to check"  # not suspected serial
 CONFIRM_SERIAL = "Confirm serial"  # not Promote
 WAITING_TO_SEND = "Waiting to send"  # not Outbox
 RETIRE = "Retire"  # stays
+RECYCLE = "Recycle"  # a Drive reused for a new show: new label, new Project
 DRIVE = "Drive"  # stays
 MOVEMENT_TITLE = "Movement"  # stays
 
@@ -49,6 +50,7 @@ VERB_WORDS = {
     "drive_unassign": "End " + PROJECT_USE,
     "drive_receive": "Drive received",
     "drive_return": "Drive returned",
+    "drive_recycle": RECYCLE + " Drive",
     "drive_retire": RETIRE + " Drive",
     "drive_release": "Shipment released",
     "drive_catalog_snapshot": "Scan of a Drive",

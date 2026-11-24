@@ -22,6 +22,7 @@ from t6.verbs import (
     DriveProjectsInput,
     DriveReloadReportInput,
     MovementListInput,
+    Preview,
     Refused,
 )
 from t6.vocabulary import DRIVE_ROLES
@@ -492,6 +493,63 @@ def create_app(
             outcome,
             lambda done: "/drive/" + drive_id,
             lambda error: notice(error, "/drive/" + drive_id),
+        )
+
+    @app.get("/drive/<drive_id>/recycle")
+    def recycle_form(drive_id):
+        drive = gateway.read("drive_get", DriveGetInput(drive=drive_id))["drive"]
+        return render_template(
+            "recycle.html",
+            d=drive,
+            projects=gateway.projects(),
+            csrf=csrf(),
+            new_key=new_key,
+            preview=None,
+        )
+
+    def recycle_values(drive_id):
+        return {
+            "drive": drive_id,
+            "project": request.form.get("project", "").strip(),
+            "label": request.form.get("label", "").strip(),
+        }
+
+    @app.post("/drive/<drive_id>/recycle/preview")
+    def recycle_preview(drive_id):
+        values, key = recycle_values(drive_id), posted_key(request.form)
+        outcome = gateway.preview("drive_recycle", values, key)
+        if not isinstance(outcome, Preview):
+            return finish(
+                outcome,
+                lambda done: "/drive/" + drive_id,
+                lambda error: notice(error, "/drive/" + drive_id + "/recycle", "Back to Recycle"),
+            )
+        found = gateway.read("drive_get", DriveGetInput(drive=drive_id))
+        drive, plan = found["drive"], outcome.plan
+        ending = [gateway.project_display(a["project"]) for a in found["assignments"] if a["open"]]
+        return render_template(
+            "recycle.html",
+            d=drive,
+            preview={
+                "old_label": plan.get("old_label"),
+                "label": plan["label"],
+                "project": gateway.project_display({"page_id": plan["project_id"], "text": None}),
+                "ending": ending,
+            },
+            values=values,
+            key=key,
+            csrf=csrf(),
+        )
+
+    @app.post("/drive/<drive_id>/recycle")
+    def recycle(drive_id):
+        outcome = gateway.submit(
+            "drive_recycle", recycle_values(drive_id), posted_key(request.form)
+        )
+        return finish(
+            outcome,
+            lambda done: "/drive/" + drive_id,
+            lambda error: notice(error, "/drive/" + drive_id + "/recycle", "Back to Recycle"),
         )
 
     @app.post("/drive/<drive_id>/promote")

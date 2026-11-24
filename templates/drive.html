@@ -9,7 +9,7 @@
 <details class="ids"><summary>Details</summary><p>Drive ID: <span class="mono">{{ d.id }}</span></p></details>
 <div class="badges">{{ status_badge(d.status) }}{% if d.needs_review %}{{ review_chip() }}{% endif %}</div>
 </div>
-<div class="actions"><a class="btn" href="/movements?drive={{ d.id|urlencode }}">Movements</a><a class="btn" href="/drive/{{ d.id }}/catalog">Contents</a>{% if d.qr_code or d.ownership == 't6' %}<a class="btn" href="/drive/{{ d.id }}/qr">QR label</a>{% else %}<form method="post" action="/drive/{{ d.id }}/qr">{% include "_hidden.html" %}<button class="btn">Add QR</button></form>{% endif %}<a class="btn" href="/drive/{{ d.id }}/edit">Edit</a><a class="btn btn--primary" href="/drive/{{ d.id }}/retire">Retire</a></div>
+<div class="actions"><a class="btn" href="/movements?drive={{ d.id|urlencode }}">Movements</a><a class="btn" href="/drive/{{ d.id }}/catalog">Contents</a>{% if d.qr_code or d.ownership == 't6' %}<a class="btn" href="/drive/{{ d.id }}/qr">QR label</a>{% else %}<form method="post" action="/drive/{{ d.id }}/qr">{% include "_hidden.html" %}<button class="btn">Add QR</button></form>{% endif %}<a class="btn" href="/drive/{{ d.id }}/edit">Edit</a><a class="btn" href="/drive/{{ d.id }}/recycle">{{ words.RECYCLE }}</a><a class="btn btn--primary" href="/drive/{{ d.id }}/retire">Retire</a></div>
 </div>
 <div class="cols">
 <div class="stack">

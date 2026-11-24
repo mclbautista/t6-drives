@@ -8,10 +8,10 @@
 {% block content %}
 {% set groups = [
   ("Identity", ["label", "description", "serial", "suspected_serial"]),
-  ("Where it is", ["office_location", "qr_code"]),
+  ("Where it is", ["office_location"]),
   ("Hardware", ["brand", "model", "form_factor", "capacity_tb", "format"]),
 ] %}
-{% set known = ["label", "description", "serial", "suspected_serial", "brand", "model", "form_factor", "capacity_tb", "format", "owner_studio_id", "purchase_date", "warranty", "review_note", "remarks", "office_location", "qr_code"] %}
+{% set known = ["label", "description", "serial", "suspected_serial", "brand", "model", "form_factor", "capacity_tb", "format", "owner_studio_id", "purchase_date", "warranty", "review_note", "remarks", "office_location"] %}
 <div class="page-head"><h1>{{ title }}</h1></div>
 {% if error %}<div class="banner"><p role="alert">{{ error|plain }}</p></div>{% endif %}
 <div class="form-card">

@@ -20,7 +20,7 @@ from t6.verbs import (
     DriveGetInput,
 )
 
-from forms import finish, new_key, posted_key
+from forms import finish, new_key, notice, posted_key
 from gateway import ApiRefused, Gateway
 from glossary import looks_like_id
 
@@ -53,13 +53,34 @@ def register_catalog(app: Flask, gateway: Gateway, csrf: Callable[[], str]) -> N
     @app.get("/drive/<drive_id>/qr")
     def qr_label(drive_id: str):
         drive = gateway.read("drive_get", DriveGetInput(drive=drive_id))["drive"]
+        # A T6 Drive needs no setup: its label is made from its ID, which a scan already accepts.
+        code = drive["qr_code"] or (drive["id"] if drive["ownership"] == "t6" else None)
         picture = None
-        if drive["qr_code"]:
-            link = request.host_url + "qr/" + drive["qr_code"]
+        if code:
+            link = request.host_url + "qr/" + code
             picture = segno.make(link, error="m").svg_inline(scale=6, border=4)
         return render_template(
-            "qr.html", d=drive, picture=picture, show_code=not looks_like_id(drive["qr_code"] or "")
+            "qr.html",
+            d=drive,
+            picture=picture,
+            show_code=bool(drive["qr_code"]) and not looks_like_id(drive["qr_code"]),
+            csrf=csrf(),
+            new_key=new_key,
         )
+
+    @app.post("/drive/<drive_id>/qr")
+    def add_qr(drive_id: str):
+        """Give the Drive its QR code, equal to its ID; a Drive that already has a code keeps it."""
+        back = f"/drive/{drive_id}/qr"
+        drive = gateway.read("drive_get", DriveGetInput(drive=drive_id))["drive"]
+        if drive["qr_code"]:
+            return redirect(back, code=303)
+        outcome = gateway.submit(
+            "drive_edit",
+            {"drive": drive_id, "qr_code": drive["id"], "expected_version": drive["version"]},
+            posted_key(request.form),
+        )
+        return finish(outcome, lambda done: back, lambda error: notice(error, back))
 
     @app.get("/qr/<code>")
     def scan(code: str):

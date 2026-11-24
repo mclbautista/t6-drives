@@ -184,15 +184,13 @@ class BrowserTest(DriveAppCase):
         page.get_by_role("button", name="Continue", exact=True).click()
         page.get_by_label("Label", exact=True).fill("Synthetic shelf drive")
         page.get_by_label("Office location", exact=True).fill("Office A / Shelf 1")
-        page.get_by_label("QR code", exact=True).fill("shelf-1")
+        expect(page.get_by_label("QR code", exact=True)).to_have_count(0)
         page.get_by_role("button", name="Save", exact=True).click()
         expect(page.get_by_text("Office A / Shelf 1", exact=True)).to_be_visible()
-        expect(page.get_by_text("SHELF-1", exact=True)).to_be_visible()
         drive_id = page.url.rsplit("/", 1)[-1]
-        page.get_by_role("link", name="QR label", exact=True).click()
+        page.get_by_role("button", name="Add QR", exact=True).click()
         expect(page.locator(".qr-picture svg")).to_be_visible()
-        expect(page.get_by_text("SHELF-1", exact=True)).to_be_visible()
-        page.goto(self.base + "/qr/shelf-1")  # what scanning the printed label opens
+        page.goto(self.base + "/qr/" + drive_id)  # what scanning the printed label opens
         self.assertTrue(page.url.endswith("/drive/" + drive_id))
         page.goto(self.base + "/")
         page.get_by_text("More filters", exact=True).click()

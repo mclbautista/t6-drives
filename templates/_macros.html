@@ -1,2 +1,3 @@
 {% macro status_badge(status) %}<span class="badge badge--{{ {'in custody': 'ok', 'released': 'info', 'retired': 'muted'}.get(status, 'neutral') }}"><span class="vh">Custody status: {{ status }}</span><span aria-hidden="true">{{ status }}</span></span>{% endmacro %}
 {% macro review_chip() %}<span class="chip chip--review">Needs review</span>{% endmacro %}
+{% macro person_picker(id, value, back) %}<input id="{{ id }}" name="person" value="{{ value }}" list="people-list" autocomplete="off" data-person-picker><datalist id="people-list"></datalist><p class="small"><a href="/people/new?back={{ back|urlencode }}">Add new person</a></p>{% endmacro %}

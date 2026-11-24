@@ -8,10 +8,12 @@ import re
 import secrets
 from collections.abc import Mapping
 from typing import Any
+from urllib.parse import urlencode
 
 from flask import Flask, Response, abort, redirect, render_template, request, session
 from t6.client import Client
 from t6.verbs import (
+    ContactFindInput,
     Done,
     DriveCaptureListInput,
     DriveCaptureReadInput,
@@ -552,6 +554,79 @@ def create_app(
             lambda error: notice(error, "/drive/" + drive_id + "/recycle", "Back to Recycle"),
         )
 
+    # People: Contacts found by name or handle, and a new Contact added after a preview and a confirm.
+    BACK = re.compile(r"/(?:[^/\\\s][^\\\s]*)?")  # a page of this app, never another site
+
+    def way_back() -> str:
+        back = request.values.get("back", "")
+        return back if BACK.fullmatch(back) else "/"
+
+    @app.get("/people/find")
+    def people_find():
+        found = gateway.read(
+            "contact_find", ContactFindInput(q=request.args.get("q", "").strip()[:80], limit=20)
+        )
+        return {
+            "people": [
+                {"name": c["name"], "handle": c.get("telegram_handle")} for c in found["contacts"]
+            ]
+        }
+
+    @app.get("/people/new")
+    def person_new():
+        return render_template(
+            "person_new.html",
+            back=way_back(),
+            csrf=csrf(),
+            new_key=new_key,
+            preview=None,
+        )
+
+    def person_values():
+        values = {"name": request.form.get("name", "").strip()}
+        for name in ("telegram_handle", "phone"):
+            if request.form.get(name, "").strip():
+                values[name] = request.form[name].strip()
+        return values
+
+    @app.post("/people/new/preview")
+    def person_preview():
+        values, key = person_values(), posted_key(request.form)
+        outcome = gateway.preview("contact_create", values, key)
+        if not isinstance(outcome, Preview):
+            return finish(
+                outcome,
+                lambda done: "/",
+                lambda error: notice(
+                    error, "/people/new?" + urlencode({"back": way_back()}), "Back"
+                ),
+                missing_is_404=False,
+            )
+        return render_template(
+            "person_new.html",
+            back=way_back(),
+            csrf=csrf(),
+            key=key,
+            values=values,
+            preview=outcome.plan,
+        )
+
+    @app.post("/people/new")
+    def person_add():
+        outcome = gateway.submit("contact_create", person_values(), posted_key(request.form))
+        back = way_back()
+
+        def done(result: Any) -> str:
+            name = result.result["contact"]["name"]
+            return back + ("&" if "?" in back else "?") + urlencode({"person": name})
+
+        return finish(
+            outcome,
+            done,
+            lambda error: notice(error, "/people/new?" + urlencode({"back": back}), "Back"),
+            missing_is_404=False,
+        )
+
     @app.post("/drive/<drive_id>/promote")
     def promote(drive_id):
         outcome = gateway.submit(
@@ -607,7 +682,7 @@ def create_app(
                     "drive": original["drive"] or "",
                     "on": original["on"] or "",
                     "direction": original["direction"],
-                    "person": original["person"] or "",
+                    "person": request.args.get("person", "").strip() or original["person"] or "",
                 },
             )
         try:

@@ -1,10 +1,12 @@
 {% extends "base.html" %}
+{% from "_macros.html" import person_picker %}
 {% block title %}Movements{% endblock %}
 {% block content %}
 <h1>Movements</h1>
 <form class="card fields">
-{% for name, label, type in [('project', 'Project', 'text'), ('drive', 'Drive (reference)', 'text'), ('person', 'Person', 'text'), ('q', 'Text', 'search'), ('start', 'From date', 'date'), ('end', 'To date', 'date')] %}
+{% for name, label, type in [('project', 'Project', 'text'), ('drive', 'Drive (reference)', 'text'), ('q', 'Text', 'search'), ('start', 'From date', 'date'), ('end', 'To date', 'date')] %}
 <div class="field"><label for="f-{{ name }}">{{ label }}</label><input id="f-{{ name }}" name="{{ name }}" type="{{ type }}" value="{{ request.args.get(name, '') }}"></div>
+{% if name == 'drive' %}<div class="field"><label for="f-person">Person</label>{{ person_picker('f-person', request.args.get('person', ''), request.full_path.rstrip('?')) }}</div>{% endif %}
 {% endfor %}
 <div class="form-actions"><button class="btn btn--primary">Filter</button><a class="btn" href="/movements">Clear filters</a></div>
 </form>

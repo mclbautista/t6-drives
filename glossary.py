@@ -43,6 +43,7 @@ SYSTEM = (
 
 # What the verbs are called to the person, for the page that lists writes waiting to be sent.
 VERB_WORDS = {
+    "contact_create": "New person",
     "drive_add": "New Drive",
     "drive_edit": "Change to a Drive",
     "drive_promote_serial": CONFIRM_SERIAL,

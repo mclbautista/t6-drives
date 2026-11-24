@@ -13,6 +13,7 @@ from pydantic import BaseModel, ValidationError
 from t6.client import APIError, Client, Unavailable
 from t6.verbs import (
     Ambiguous,
+    ContactCreateInput,
     Done,
     DriveAddInput,
     DriveAssignInput,
@@ -42,6 +43,7 @@ from outbox import Outbox
 log = logging.getLogger("drives.gateway")
 PROJECT_SECONDS = 300.0
 WRITES: dict[str, type[BaseModel]] = {
+    "contact_create": ContactCreateInput,
     "drive_add": DriveAddInput,
     "drive_edit": DriveEditInput,
     "drive_promote_serial": DrivePromoteSerialInput,

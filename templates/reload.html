@@ -1,0 +1,9 @@
+{% extends "base.html" %}
+{% block title %}Reload now{% endblock %}
+{% block content %}
+<div class="page-head"><h1>Reload now</h1></div>
+<p class="lead">This replaces the Drives, Project use and movements with what the sheets say right now. Anything entered here that is not in the sheets is lost. Nothing has changed yet.</p>
+{% if report %}<p class="card">Now loaded ({{ report.at }}): {{ report.rows_read }} rows read, {{ report.drives }} Drive{{ '' if report.drives == 1 else 's' }}, {{ report.exceptions }} not loaded.</p>
+{% else %}<p class="card">No reload has run yet.</p>{% endif %}
+<form method="post" action="/exceptions/reload"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="key" value="{{ key }}"><input type="hidden" name="token" value="{{ token }}"><button class="btn btn--primary">Reload now</button> <a href="/exceptions">Cancel</a></form>
+{% endblock %}

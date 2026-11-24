@@ -9,6 +9,7 @@
 !custody.py
 !catalog.py
 !shipments.py
+!reload.py
 !runtime.py
 !templates/
 !templates/*.html

@@ -32,6 +32,7 @@ from custody import register_custody
 from forms import finish, new_key, notice, posted_key
 from gateway import ApiRefused, ApiUnavailable, Gateway
 from outbox import Outbox
+from reload import register_reload
 from shipments import register_shipments
 
 # Everything `drive add` and `drive edit` take; `ownership` on the form stands for two inputs.
@@ -466,6 +467,7 @@ def create_app(
     register_custody(app, gateway, csrf)
     register_catalog(app, gateway, csrf)
     register_shipments(app, gateway, csrf)
+    register_reload(app, gateway, csrf)
 
     def movement_log() -> list[dict[str, Any]]:
         return list(gateway.read("movement_list", MovementListInput())["movements"])

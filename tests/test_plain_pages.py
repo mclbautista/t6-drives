@@ -144,6 +144,7 @@ class PlainPageCase(DriveAppCase):
             "/?status=released",
             "/new",
             "/projects",
+            "/projects?q=syn&out=1&kind=name_only&sort=total",
             f"/projects/view?project={self.project}",
             "/projects/view?project=Synthetic%20text%20project",
             "/movements",

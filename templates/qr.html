@@ -14,6 +14,6 @@
 </section>
 <p class="muted no-print">Print this page from the browser. Scanning the label opens this Drive.</p>
 {% else %}
-<div class="card empty"><p class="empty-title">This Drive has no QR code yet.</p><p class="muted">Add one on the edit page, then come back to print the label.</p><a class="btn btn--primary" href="/drive/{{ d.id }}/edit">Edit Drive</a></div>
+<div class="card empty"><p class="empty-title">This Drive has no QR code yet.</p><p class="muted">Add one to print a label. Scanning it opens this Drive.</p><form method="post" action="/drive/{{ d.id }}/qr">{% include "_hidden.html" %}<button class="btn btn--primary">Add QR</button></form></div>
 {% endif %}
 {% endblock %}

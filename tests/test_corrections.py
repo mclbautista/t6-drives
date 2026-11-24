@@ -192,7 +192,7 @@ class ExceptionsPageTests(CorrectionCase):
     def test_an_unresolved_capture_shows_its_photo_and_text(self):
         capture = self.api.capture("OUT Invented Courier|SYN-NOWHERE")
         html = self.text("/exceptions")
-        self.assertIn("Unresolved captures", html)
+        self.assertIn("Give a photo a Drive", html)
         self.assertIn("OUT Invented Courier|SYN-NOWHERE", html)
         self.assertIn(f'<img class="capture-photo" src="/captures/{capture}/photo"', html)
         self.assertIn("2026-11-02", html)
@@ -217,12 +217,7 @@ class ExceptionsPageTests(CorrectionCase):
 
     def test_no_unresolved_captures_say_so_and_leave_no_form(self):
         html = self.text("/exceptions")
-        for empty in (
-            "No unresolved captures.",
-            "No movements need a Project.",
-            "No import exceptions.",
-        ):
-            self.assertIn(empty, html)
+        self.assertIn("Nothing to do.", html)
         self.assertNotIn("<form", html)
 
     def test_a_capture_is_given_a_drive_picked_from_search(self):
@@ -248,7 +243,7 @@ class ExceptionsPageTests(CorrectionCase):
         self.api.resolve_capture(capture, revision=1)
         self.assertEqual(self.status(drive), "released")
         self.assertEqual(self.movements(drive=drive)[0]["capture"], capture)
-        self.assertNotIn(capture, self.text("/exceptions"))
+        self.assertNotIn(f'data-capture="{capture}"', self.text("/exceptions"))
 
     def test_a_drive_that_is_not_there_is_refused_and_shown(self):
         self.api.add_drive(label="Synthetic listed", serial="SYN-L")
@@ -263,7 +258,7 @@ class ExceptionsPageTests(CorrectionCase):
         project = self.api.project("Synthetic needs project")
         drive, movement = self.released_drive()
         html = self.text("/exceptions")
-        self.assertIn("Needs a Project", html)
+        self.assertIn("Pick a Project", html)
         self.assertIn(f'data-movement="{movement}"', html)
         self.assertIn("Synthetic master", html)
         self.assertIn(f'<option value="{project}"', html)
@@ -292,7 +287,7 @@ class ExceptionsPageTests(CorrectionCase):
         self.assertIn("No reload has run.", self.text("/exceptions"))
         load_projects(self)
         html = self.text("/exceptions")
-        self.assertIn("Unmapped Project names", html)
+        self.assertIn("Project names the sheet uses that T6 does not know", html)
         for name in ("Synthetic text project", "Synthetic violet"):
             self.assertIn(f"<li>{name}</li>", html)
         self.assertNotIn("No reload has run.", html)
@@ -304,13 +299,13 @@ class ExceptionsPageTests(CorrectionCase):
             workbook="synthetic.xlsx", sheet="Log", row=9, reason="bad row", detail="x"
         )
         html = self.text("/exceptions")
-        self.assertIn("Rows the reload could not load", html)
+        self.assertIn("Fix a row in the sheet", html)
         self.assertIn("bad row", html)
 
     def test_overdue_t6_drives_are_listed_from_the_reminder_read(self):
         project = self.api.project("Synthetic overdue project")
         drive = self.api.add_drive(label="Synthetic overdue", serial="SYN-OD")
-        self.assertIn("No T6 drives are overdue.", self.text("/exceptions"))
+        self.assertEqual(self.text("/exceptions").count('data-item="overdue"'), 0)
         self.api.write(
             "drive_release",
             DriveReleaseInput,

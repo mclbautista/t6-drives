@@ -30,7 +30,7 @@ Check: open it from another office machine, which works; a request whose `Host` 
 | Screen | t6 verb |
 | --- | --- |
 | `/` search and filters, with each Drive's open Project use | `drive list` |
-| `/projects` | `drive projects` (API counts, including text-only Projects) |
+| `/projects` | `drive projects` (API counts, including text-only Projects), `project list` (Project codes). Search by name or code (`q`), filters has drives out (`out=1`) and Registered or Name only, not linked to a Project yet (`kind`), sorts A to Z (default), most drives out, most drives in total (`sort`); the latest-movement sort and default come with the core ticket for latest movement. |
 | `/projects/view?project=<id or text>` | `drive list`, `movement list` |
 | `/movements` | `movement list` (Project, person, text and date-range filters) |
 | `/new` serial first | `drive list` (exact accepted serial), then `drive add` |
@@ -38,7 +38,7 @@ Check: open it from another office machine, which works; a request whose `Host` 
 | `/drive/<id>/edit` | `drive edit` (every fact; the form sends the Drive's `version` as `expected_version`, and a Drive that changed meanwhile is shown again) |
 | `/drive/<id>/promote` | `drive promote-serial` (the "Confirm serial" button) |
 | Project use on the Drive page | `drive assign` (with remarks), `drive unassign` (by Assignment number, so one whose Project is text only can be ended) |
-| `/drive/<id>/qr`, `/qr/<code or id>` | `drive get`, `drive find` (a printable QR label of the Drive's code; scanning it opens the Drive) |
+| `/drive/<id>/qr`, `/qr/<code or id>` | `drive get`, `drive find`, `drive edit` (a printable QR label of the Drive's code; scanning it opens the Drive). A QR code is optional and is not on the forms: the "Add QR" button sets it equal to the Drive's ID, and a T6-owned Drive shows its label with no setup. |
 | `/drive/<id>/catalog` | `drive catalog-snapshots`, `drive catalog-diff`, `drive catalog-at` (scans, what each changed, the contents on a date with `?on=YYYY-MM-DD`), and `drive catalog-snapshot` (upload a JSON manifest) |
 | `/drive/<id>/retire` | `drive retire` |
 | `/drive/<id>/custody` (legacy direct URL) | `drive receive`, `drive return`, `drive retire` |
@@ -46,9 +46,10 @@ Check: open it from another office machine, which works; a request whose `Host` 
 | `/shipments`, `/shipments/<id>` | `drive shipments`, `drive shipment` (the manifest shows the facts stored at release) |
 | `/movements/<id>/correct` | `movement list`, `movement correct` (a correction is a new entry; the original stays in the log, with a link each way) |
 | `/drive/<id>/place` | `drive edit` (place TABLE, CABINET, SHELF, BOX or none, and T6 ownership; the search line shows both) |
-| `/exceptions` | `drive capture list` (unresolved captures with text and photo), `drive capture photo`, `drive capture` with a Drive, `movement list` (needs a Project) and `movement correct` (set it), `drive overdue`, `drive reload report` (unmapped Project names), `drive exceptions` (rows the reload could not load) |
+| `/exceptions` | a to-do list in four groups (give a photo a Drive, pick a Project, fix a row in the sheet, overdue T6 drives), each item one sentence and one button, with counts at the top: `drive capture list` (unresolved captures with text and photo), `drive capture photo`, `drive capture` with a Drive, `movement list` (needs a Project) and `movement correct` (set it), `drive overdue`, `drive reload report` (unmapped Project names), `drive exceptions` (rows the reload could not load) |
 | `/captures/<id>/photo`, `/captures/<id>/drive` | `drive capture photo`, `drive list` and `drive capture` (pick a Drive for an unresolved capture) |
 | `/movements/<id>`, `/movements/<id>/photo`, `/movements/<id>/photo/delete` | `movement list`, `movement photo-get`, `movement photo-add` (add or replace), `movement photo-delete` (the API lets only the drive custodian or an operator delete) |
+| Movement photos | a movement recorded from TRANSMITTAL shows its capture photo as a thumbnail that opens it (`drive capture photo`) |
 | `/outbox` | "Waiting to send": writes waiting for the API, or refused by it |
 | `/health` | none (process readiness) |
 

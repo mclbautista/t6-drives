@@ -11,6 +11,7 @@
 !shipments.py
 !runtime.py
 !movement_photos.py
+!glossary.py
 !templates/
 !templates/*.html
 !templates/*.css

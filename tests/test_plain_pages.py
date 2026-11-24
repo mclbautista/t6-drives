@@ -158,6 +158,7 @@ class PlainPageCase(DriveAppCase):
             f"/drive/{self.late}",
             drive + "/edit",
             drive + "/retire",
+            drive + "/recycle",
             drive + "/custody",
             drive + "/qr",
             f"/drive/{self.other}/qr",
@@ -192,6 +193,11 @@ class EveryPageIsPlainTests(PlainPageCase):
             self.submit(f"/drive/{self.drive}/retire", kind="retired", project="t6p_" + "0" * 24),
             self.submit(f"/drive/{self.late}/promote", form="/new"),  # no serial to confirm
         ]
+        recycle = f"/drive/{self.drive}/recycle"
+        for label in ("Plain new label", " "):  # what will change, and a refusal
+            pages.append(
+                self.submit(recycle + "/preview", form=recycle, project=self.project, label=label)
+            )
         hidden = self.fields("/new")
         self.api.mode = "down"
         pages.append(self.web.get("/"))

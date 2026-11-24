@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+{% block title %}{{ words.RECYCLE }} Drive{% endblock %}
+{% block content %}
+<div class="page-head"><div><h1>{{ words.RECYCLE }} Drive</h1><p class="sub">Drive: {{ d.label or 'No label' }}{% if d.serial %} · {{ d.serial }}{% endif %}</p></div></div>
+{% if preview %}
+<div class="form-card">
+<h2>This will change</h2>
+<ul class="stack">
+<li>The label changes from “{{ preview.old_label or 'No label' }}” to “{{ preview.label }}”.</li>
+{% for name in preview.ending %}<li>{{ name }}: this {{ words.PROJECT_USE|lower }} ends today.</li>{% else %}<li>No open {{ words.PROJECT_USE|lower }} ends.</li>{% endfor %}
+<li>A new {{ words.PROJECT_USE|lower }} starts for {{ preview.project }}.</li>
+<li>The old label stays in the Drive’s history.</li>
+</ul>
+<form method="post" action="/drive/{{ d.id }}/recycle">
+<input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="key" value="{{ key }}">
+<input type="hidden" name="project" value="{{ values.project }}"><input type="hidden" name="label" value="{{ values.label }}">
+<div class="form-actions"><button class="btn btn--primary">Confirm {{ words.RECYCLE|lower }}</button><a class="btn btn--quiet" href="/drive/{{ d.id }}/recycle">Change it</a><a class="btn btn--quiet" href="/drive/{{ d.id }}">Cancel</a></div>
+</form>
+</div>
+{% else %}
+<p class="lead">Give this Drive a new label and Project. You will see what changes before it is saved.</p>
+<div class="form-card">
+<form method="post" action="/drive/{{ d.id }}/recycle/preview">
+{% include "_hidden.html" %}
+<div class="fields">
+<div class="field"><label for="r-label">New label</label><input id="r-label" name="label" required></div>
+<div class="field field--wide"><label for="r-project">Project</label><select id="r-project" name="project">{% for p in projects %}<option value="{{ p.t6_id }}">{{ p.name }}</option>{% endfor %}</select></div>
+</div>
+<div class="form-actions"><button class="btn btn--primary">See what changes</button><a class="btn btn--quiet" href="/drive/{{ d.id }}">Cancel</a></div>
+</form>
+</div>
+{% endif %}
+{% endblock %}

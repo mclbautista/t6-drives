@@ -21,6 +21,7 @@ from t6.verbs import (
     DriveEditInput,
     DrivePromoteSerialInput,
     DriveReceiveInput,
+    DriveRecycleInput,
     DriveReleaseInput,
     DriveReloadInput,
     DriveRetireInput,
@@ -48,6 +49,7 @@ WRITES: dict[str, type[BaseModel]] = {
     "drive_unassign": DriveUnassignInput,
     "drive_receive": DriveReceiveInput,
     "drive_return": DriveReturnInput,
+    "drive_recycle": DriveRecycleInput,
     "drive_retire": DriveRetireInput,
     "drive_release": DriveReleaseInput,
     "drive_catalog_snapshot": DriveCatalogSnapshotInput,
@@ -182,6 +184,17 @@ class Gateway:
             outcome = call(
                 client, method, model(**values, idempotency_key=key, confirm=outcome.token)
             )
+        return outcome
+
+    def preview(self, method: str, values: dict[str, Any], key: str) -> Outcome:
+        """What a write would change, for the person to read before confirming. Nothing is written, so nothing is queued."""
+        try:
+            WRITES[method](**values, idempotency_key=key)
+        except ValidationError:
+            return Refused(rule="input", reason="Check the values entered.")
+        outcome = call(self.client, method, WRITES[method](**values, idempotency_key=key))
+        if isinstance(outcome, Unavailable):
+            raise ApiUnavailable
         return outcome
 
     def submit(self, method: str, values: dict[str, Any], key: str) -> Outcome | Queued:

@@ -37,6 +37,7 @@ Check: open it from another office machine, which works; a request whose `Host` 
 | `/drive/<id>` | `drive get` |
 | `/drive/<id>/edit` | `drive edit` (every fact; the form sends the Drive's `version` as `expected_version`, and a Drive that changed meanwhile is shown again) |
 | `/drive/<id>/promote` | `drive promote-serial` (the "Confirm serial" button) |
+| `/drive/<id>/recycle` | `drive recycle` (a new label and Project; the form shows what will change, then the confirm) |
 | Project use on the Drive page | `drive assign` (with remarks), `drive unassign` (by Assignment number, so one whose Project is text only can be ended) |
 | `/drive/<id>/qr`, `/qr/<code or id>` | `drive get`, `drive find`, `drive edit` (a printable QR label of the Drive's code; scanning it opens the Drive). A QR code is optional and is not on the forms: the "Add QR" button sets it equal to the Drive's ID, and a T6-owned Drive shows its label with no setup. |
 | `/drive/<id>/catalog` | `drive catalog-snapshots`, `drive catalog-diff`, `drive catalog-at` (scans, what each changed, the contents on a date with `?on=YYYY-MM-DD`), and `drive catalog-snapshot` (upload a JSON manifest) |

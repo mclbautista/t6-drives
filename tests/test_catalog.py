@@ -27,36 +27,58 @@ def manifest(entries: Any, name: str = "scan.json"):
 
 
 class ShelfFactTests(DriveAppCase):
-    def test_office_location_and_qr_code_are_added_edited_cleared_and_shown(self):
+    def test_the_forms_have_no_qr_field_and_an_edit_keeps_an_existing_code(self):
+        blank = self.submit("/new", form="/new", serial="X1")
+        self.assertIn('name="label"', blank.get_data(as_text=True))
+        self.assertNotIn('name="qr_code"', blank.get_data(as_text=True))
         response = self.submit(
-            "/new", label="Shelf drive", office_location="Office A / Shelf 1", qr_code=" ab-12 "
+            "/new", label="Shelf drive", office_location="Office A / Shelf 1", qr_code="ignored"
         )
         self.assertEqual(response.status_code, 303)
         drive = self.only_drive()
-        self.assertEqual(
-            (drive["office_location"], drive["qr_code"]), ("Office A / Shelf 1", "AB-12")
-        )
-        detail = self.text(response.headers["Location"])
-        self.assertIn("Office A / Shelf 1", detail)
-        self.assertIn("AB-12", detail)
+        self.assertEqual((drive["office_location"], drive["qr_code"]), ("Office A / Shelf 1", None))
+        self.assertIn("Office A / Shelf 1", self.text(response.headers["Location"]))
         form = self.text(f"/drive/{drive['id']}/edit")
         self.assertIn('name="office_location" value="Office A / Shelf 1"', form)
-        self.submit(
-            f"/drive/{drive['id']}/edit", label="Shelf drive", office_location="Office A / Shelf 2"
-        )
-        changed = self.only_drive()
+        self.assertNotIn('name="qr_code"', form)
+        coded = self.api.add_drive(label="Coded", qr_code="OLD-1")
+        self.submit(f"/drive/{coded}/edit", label="Coded again")
+        kept = self.api.drive(coded)["drive"]
+        self.assertEqual((kept["label"], kept["qr_code"]), ("Coded again", "OLD-1"))
+        self.assertIn("OLD-1", self.text(f"/drive/{coded}"))
+
+    def test_add_qr_gives_a_drive_its_id_as_code_and_shows_the_label(self):
+        drive = self.api.add_drive(label="Client drive", ownership_known=False)
+        self.assertIn("Add QR", self.text(f"/drive/{drive}"))
+        page = self.text(f"/drive/{drive}/qr")
+        self.assertIn("Add QR", page)
+        self.assertNotIn("<svg", page)
+        response = self.submit(f"/drive/{drive}/qr", form=f"/drive/{drive}/qr")
+        self.assertEqual(response.status_code, 303)
+        self.assertEqual(response.headers["Location"], f"/drive/{drive}/qr")
+        code = self.api.drive(drive)["drive"]["qr_code"]
+        self.assertEqual(code.lower(), drive)
+        label = self.text(f"/drive/{drive}/qr")
+        self.assertIn("<svg", label)
+        self.assertNotIn("Add QR", label)
+        self.assertNotIn("Add QR", self.text(f"/drive/{drive}"))
+        scanned = self.web.get("/qr/" + code)
         self.assertEqual(
-            (changed["office_location"], changed["qr_code"]), ("Office A / Shelf 2", None)
+            (scanned.status_code, scanned.headers["Location"]), (303, f"/drive/{drive}")
         )
 
-    def test_a_second_drive_cannot_take_a_qr_code_and_an_unsafe_one_is_refused(self):
-        self.api.add_drive(label="First", qr_code="QR-1")
-        taken = self.submit("/new", label="Second", qr_code="qr-1")
-        self.assertEqual(taken.status_code, 400)
-        self.assertIn("already on a Drive", taken.get_data(as_text=True))
-        unsafe = self.submit("/new", label="Third", qr_code="has space")
-        self.assertEqual(unsafe.status_code, 400)
-        self.assertEqual(len(self.api.drives()), 1)
+    def test_a_t6_drive_shows_its_label_without_adding_a_code(self):
+        drive = self.api.add_drive(label="Ours")
+        page = self.text(f"/drive/{drive}/qr")
+        self.assertIn("<svg", page)
+        self.assertNotIn("Add QR", page)
+        self.assertNotIn("Add QR", self.text(f"/drive/{drive}"))
+        self.assertEqual(self.web.get(f"/qr/{drive}").status_code, 303)
+
+    def test_add_qr_does_not_replace_an_existing_code(self):
+        drive = self.api.add_drive(label="Coded", qr_code="OLD-2")
+        self.submit(f"/drive/{drive}/qr", form=f"/drive/{drive}/edit")
+        self.assertEqual(self.api.drive(drive)["drive"]["qr_code"], "OLD-2")
 
     def test_scanning_a_label_opens_its_drive_by_code_in_any_case_or_by_id(self):
         drive = self.api.add_drive(label="Scanned", qr_code="QR-7")
@@ -77,7 +99,7 @@ class ShelfFactTests(DriveAppCase):
         page = self.text(f"/drive/{drive}/qr")
         for shown in ("<svg", "QR-9", "Labelled", "LBL-1", "Office A / Shelf 1"):
             self.assertIn(shown, page)
-        bare = self.api.add_drive(label="No code")
+        bare = self.api.add_drive(label="No code", ownership_known=False)
         self.assertIn("no QR code yet", self.text(f"/drive/{bare}/qr"))
         self.assertEqual(self.web.get("/drive/t6d_" + "0" * 32 + "/qr").status_code, 404)
 

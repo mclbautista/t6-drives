@@ -51,7 +51,6 @@ ADD_FIELDS = (
     "warranty",
     "remarks",
     "office_location",
-    "qr_code",
 )
 LABELS = {
     "serial": "Serial",
@@ -378,7 +377,7 @@ def create_app(
             d=drive,
             assignments=found["assignments"],
             ownership=ownership,
-            fields=ADD_FIELDS,
+            fields=(*ADD_FIELDS, "qr_code"),
             labels=LABELS,
             csrf=csrf(),
             new_key=new_key,

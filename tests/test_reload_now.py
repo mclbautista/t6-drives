@@ -9,9 +9,8 @@ from unittest.mock import patch
 
 from openpyxl import Workbook  # type: ignore[import-untyped]
 from support import DriveAppCase
-from t6.client import Client
 from t6.drives.sheets import WorkbookSheetSource
-from t6.verbs import Done, DriveCutoverInput, DriveListInput, Preview
+from t6.verbs import DriveListInput
 
 TAB = "Synthetic reload show"
 
@@ -52,20 +51,10 @@ class ReloadCase(DriveAppCase):
         return sorted(d["label"] for d in self.api.read("drive_list", DriveListInput)["drives"])
 
     def go_live(self) -> None:
-        client = Client(self.api.url, "synthetic-operator-secret")
-        path = self.directory + "/live.xlsx"
-        workbook = Workbook()
-        sheet = workbook.active
-        assert sheet is not None
-        sheet.title = TAB
-        sheet.append(["HARD DRIVE LABEL", "SERIAL NUMBER"])
-        workbook.save(path)
-        preview = client.drive_cutover(DriveCutoverInput(workbook=path, idempotency_key="live"))
-        assert isinstance(preview, Preview)
-        done = client.drive_cutover(
-            DriveCutoverInput(workbook=path, idempotency_key="live", confirm=preview.token)
-        )
-        assert isinstance(done, Done), done
+        """Live mode is the T6_DRIVE_LIVE setting read when the API starts (t6 ADR 0010)."""
+        from t6.drives.practice import apply_live_setting
+
+        apply_live_setting(self.api.registry, {"T6_DRIVE_LIVE": "true"})
 
     def confirm_form(self, html: str) -> dict[str, str]:
         found = re.search(r'<form[^>]*action="/exceptions/reload".*?</form>', html, re.DOTALL)

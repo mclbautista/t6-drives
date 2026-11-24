@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+{% block title %}Movement{% endblock %}
+{% block content %}
+<div class="page-head"><h1>Movement</h1><a class="btn" href="/movements{% if m.drive %}?drive={{ m.drive|urlencode }}{% endif %}">Movement log</a></div>
+{% if error %}<div class="banner"><p role="alert">{{ error|plain }}</p></div>{% endif %}
+<section class="card">
+<dl class="facts">
+<div><dt>Drive</dt><dd>{% if m.drive %}<a href="/drive/{{ m.drive }}">{{ m.label or "Drive without a label" }}</a>{% else %}{{ m.label or 'Unknown label' }} (no Drive yet){% endif %}</dd></div>
+<div><dt>Date</dt><dd>{{ m.on or 'Undated' }}</dd></div>
+<div><dt>Direction</dt><dd>{{ m.direction }}</dd></div>
+<div><dt>Person</dt><dd>{{ m.person or 'Unknown' }}</dd></div>
+<div><dt>Place</dt><dd>{{ m.place or 'Unknown' }}</dd></div>
+<div><dt>Project</dt><dd>{{ display(m.project) }}</dd></div>
+</dl>
+<p class="small"><a href="/movements/{{ m.id }}/correct">Correct this entry</a></p>
+</section>
+<div class="form-card form-card--inset">
+<h2>Photo</h2>
+{% if m.photo == 'upload' %}
+<a href="/movements/{{ m.id }}/photo"><img class="capture-photo" src="/movements/{{ m.id }}/photo" alt="Photo of this movement"></a>
+<form method="post" action="/movements/{{ m.id }}/photo" enctype="multipart/form-data">
+{% include "_hidden.html" %}
+<div class="field"><label for="p-photo">Replace with another photo</label><input id="p-photo" name="photo" type="file" accept="image/jpeg,image/png,image/webp"></div>
+<div class="form-actions"><button class="btn btn--primary">Replace photo</button></div>
+</form>
+<form method="post" action="/movements/{{ m.id }}/photo/delete">
+{% include "_hidden.html" %}
+<p class="muted small">Only the drive custodian or an operator can delete a photo.</p>
+<div class="form-actions"><button class="btn">Delete photo</button></div>
+</form>
+{% else %}
+{% if m.photo == 'capture' %}<p class="muted small">This movement came from a TRANSMITTAL post, which keeps its own photo.</p>{% endif %}
+<form method="post" action="/movements/{{ m.id }}/photo" enctype="multipart/form-data">
+{% include "_hidden.html" %}
+<div class="field"><label for="p-photo">Add a photo (optional)</label><input id="p-photo" name="photo" type="file" accept="image/jpeg,image/png,image/webp"><span class="muted small">JPEG, PNG or WebP, up to 10 MB.</span></div>
+<div class="form-actions"><button class="btn btn--primary">Add photo</button></div>
+</form>
+{% endif %}
+</div>
+{% endblock %}

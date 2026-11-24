@@ -16,7 +16,7 @@
 <p class="muted small">A correction is a new entry. This one stays in the log.</p>
 </section>
 <div class="form-card">
-<form method="post">
+<form method="post" enctype="multipart/form-data">
 {% include "_hidden.html" %}
 <h2>Correction</h2>
 <p class="muted small">Leave a field as it is to keep it. Only what you change is sent.</p>
@@ -26,6 +26,7 @@
 <div class="field"><label for="c-direction">Direction</label><select id="c-direction" name="direction">{% for choice in ['IN', 'OUT'] %}<option{% if (values.get('direction') or m.direction) == choice %} selected{% endif %}>{{ choice }}</option>{% endfor %}</select></div>
 <div class="field"><label for="c-person">Person</label><input id="c-person" name="person" value="{{ values.get('person') or '' }}"></div>
 <div class="field"><label for="c-place">Place</label><select id="c-place" name="place"><option value="{{ keep }}" selected>Keep: {{ m.place or 'none' }}</option><option value="none">No place</option>{% for place in places %}<option>{{ place }}</option>{% endfor %}</select></div>
+<div class="field"><label for="c-photo">Add a photo (optional)</label><input id="c-photo" name="photo" type="file" accept="image/jpeg,image/png,image/webp"><span class="muted small">JPEG, PNG or WebP, up to 10 MB. With no other change, it goes on this entry.</span></div>
 <div class="field"><label for="c-project">Project</label><select id="c-project" name="project"><option value="{{ keep }}" selected>Keep: {{ display(m.project) }}</option>{% for p in projects %}<option value="{{ p.t6_id }}">{{ p.name }}</option>{% endfor %}</select></div>
 </div>
 <div class="form-actions"><button class="btn btn--primary">Save correction</button><a class="btn btn--quiet" href="/movements{% if m.drive %}?drive={{ m.drive|urlencode }}{% endif %}">Cancel</a></div>

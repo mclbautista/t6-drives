@@ -8,8 +8,9 @@
 {% include "_movement_photo.html" %}
 {% if m.description %}<p>{{ m.description }}</p>{% endif %}
 {% if m.remarks %}<p>{{ m.remarks }}</p>{% endif %}
+{% if m.photo == 'upload' %}<a href="/movements/{{ m.id }}"><img class="movement-thumb" src="/movements/{{ m.id }}/photo" alt="Photo of this movement" loading="lazy"></a>{% endif %}
 {% if m.corrects %}<p class="muted small"><a href="#m-{{ m.corrects }}">Correction of the earlier entry</a></p>{% endif %}
-{% if m.id in corrected_by %}<p class="muted small"><span class="chip">Corrected</span> <a href="#m-{{ corrected_by[m.id] }}">See the correction</a></p>{% else %}<p class="small"><a href="/movements/{{ m.id }}/correct">Correct this entry</a></p>{% endif %}
+{% if m.id in corrected_by %}<p class="muted small"><span class="chip">Corrected</span> <a href="#m-{{ corrected_by[m.id] }}">See the correction</a></p>{% else %}<p class="small"><a href="/movements/{{ m.id }}/correct">Correct this entry</a> · <a href="/movements/{{ m.id }}">{% if m.photo == 'upload' %}Photo{% else %}Add a photo{% endif %}</a></p>{% endif %}
 </li>
 {% else %}<li class="empty-note">No movements match.</li>{% endfor %}
 </ul>

@@ -12,7 +12,7 @@ RUN pip install --no-cache-dir --no-index /wheels/*.whl && rm -rf /wheels \
     && groupadd --gid 10001 drives && useradd --uid 10001 --gid 10001 --no-create-home drives \
     && mkdir /data && chown 10001:10001 /data && chmod 700 /data
 WORKDIR /app
-COPY app.py gateway.py forms.py outbox.py custody.py catalog.py shipments.py reload.py runtime.py glossary.py ./
+COPY app.py gateway.py forms.py outbox.py custody.py catalog.py shipments.py reload.py runtime.py glossary.py movement_photos.py ./
 COPY templates ./templates
 USER 10001:10001
 EXPOSE 8080

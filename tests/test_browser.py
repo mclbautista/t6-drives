@@ -93,6 +93,40 @@ class BrowserTest(DriveAppCase):
             expect(self.page.get_by_text("Synthetic master", exact=True)).to_have_count(0)
             self.assertLessEqual(self.page.evaluate("document.documentElement.scrollWidth"), width)
 
+    def test_a_movement_photo_is_added_and_drawn_at_phone_and_desktop_width(self):
+        from unittest.mock import patch
+
+        from support import PHOTO
+
+        env = patch.dict(os.environ, {"T6_DRIVE_PHOTO_DIR": self.directory + "/photos"})
+        env.start()
+        self.addCleanup(env.stop)
+        drive = self.api.add_drive(label="Synthetic photo drive", serial="SYN-PHOTO")
+        self.api.capture("OUT Invented Courier|SYN-PHOTO")
+        movement = self.api.read("movement_list", MovementListInput, drive=drive)["movements"][0]
+        path = self.directory + "/synthetic.png"
+        with open(path, "wb") as file:
+            file.write(PHOTO)
+        for width in (375, 1280):
+            self.page.set_viewport_size({"width": width, "height": 900})
+            self.page.goto(self.base + f"/movements?drive={drive}")
+            self.page.get_by_role("link", name="Add a photo", exact=True).first.click()
+            self.page.get_by_label("Add a photo (optional)").set_input_files(path)
+            self.page.get_by_role("button", name="Add photo", exact=True).click()
+            expect(
+                self.page.get_by_role("button", name="Replace photo", exact=True)
+            ).to_be_visible()
+            self.assertLessEqual(self.page.evaluate("document.documentElement.scrollWidth"), width)
+            self.page.goto(self.base + f"/movements?drive={drive}")
+            thumb = self.page.locator(f'img[src="/movements/{movement["id"]}/photo"]')
+            expect(thumb).to_be_visible()
+            self.assertGreater(thumb.evaluate("img => img.naturalWidth"), 0)
+            self.assertLessEqual(self.page.evaluate("document.documentElement.scrollWidth"), width)
+            with patch.dict(os.environ, {"T6_DRIVE_CUSTODIAN_PERSON_ID": self.api.custodian}):
+                self.page.goto(self.base + f"/movements/{movement['id']}")
+                self.page.get_by_role("button", name="Delete photo", exact=True).click()
+            expect(self.page.get_by_role("button", name="Add photo", exact=True)).to_be_visible()
+
     def test_search_and_new_drive_at_phone_and_desktop_width(self):
         drive = self.api.add_drive(
             label="Synthetic phone master " + "x" * 100,

@@ -12,6 +12,7 @@ from typing import Any
 from flask import Flask, Response, abort, redirect, render_template, request, session
 from t6.client import Client
 from t6.verbs import (
+    Done,
     DriveCaptureListInput,
     DriveCaptureReadInput,
     DriveExceptionsInput,
@@ -30,7 +31,8 @@ import glossary
 from catalog import allow_manifest, register_catalog
 from custody import register_custody
 from forms import finish, new_key, notice, posted_key
-from gateway import ApiRefused, ApiUnavailable, Gateway
+from gateway import ApiRefused, ApiUnavailable, Gateway, Queued
+from movement_photos import PhotoRefused, allow_photo, chosen_photo, register_photos, send_photo
 from outbox import Outbox
 from reload import register_reload
 from shipments import register_shipments
@@ -142,7 +144,8 @@ def create_app(
         if request.method not in ("GET", "HEAD", "OPTIONS"):
             allow_manifest(
                 request.path
-            )  # before the form is read: only the scan upload may be large
+            )  # before the form is read: only the scan upload and a photo may be large
+            allow_photo(request.path)
             origin = request.headers.get("Origin")
             if origin is not None and origin != request.host_url.rstrip("/"):
                 abort(403)
@@ -549,6 +552,11 @@ def create_app(
                     "person": original["person"] or "",
                 },
             )
+        try:
+            photo = chosen_photo(request.files)
+        except PhotoRefused as refused:
+            return correction_page(original, form, str(refused)), 400
+        key = posted_key(form)
         values: dict[str, Any] = {"movement": movement_id}
         for name in ("drive", "on", "person"):
             typed = form.get(name, "").strip()
@@ -564,7 +572,32 @@ def create_app(
         project = form.get("project", KEEP).strip()
         if project not in ("", KEEP):
             values["project"] = project
-        outcome = gateway.submit("movement_correct", values, posted_key(form))
+        if photo is not None and len(values) == 1:
+            # Only a photo: it goes on this entry, and nothing is corrected.
+            sent = send_photo(gateway, movement_id, photo, key + "-photo")
+            if isinstance(sent, str):
+                return correction_page(original, form, sent), 400
+            return redirect("/movements/" + movement_id, code=303)
+        outcome = gateway.submit("movement_correct", values, key)
+        if photo is not None and isinstance(outcome, Queued):
+            return notice(
+                "The correction waits to be sent, and the photo was not kept. "
+                "Add the photo on the movement once the correction is in the log.",
+                "/movements",
+                "Movement log",
+            ), 202
+        if photo is not None and isinstance(outcome, Done):
+            corrected = str(outcome.result["movement"]["id"])
+            try:
+                sent = send_photo(gateway, corrected, photo, key + "-photo")
+            except ApiUnavailable:
+                sent = "The t6 API could not be reached."
+            if isinstance(sent, str):
+                return notice(
+                    "The correction was saved, but the photo was not: " + sent,
+                    "/movements/" + corrected,
+                    "Add the photo again",
+                ), 502
 
         def again(error: str) -> str:
             return correction_page(original, form, error)
@@ -575,6 +608,8 @@ def create_app(
             again,
             missing_is_404=False,
         )
+
+    register_photos(app, gateway, csrf, original_of, gateway.project_display)
 
     @app.post("/movements/<movement_id>/project")
     def set_movement_project(movement_id):

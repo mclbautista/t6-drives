@@ -26,7 +26,7 @@ from t6.privacy import Person, Registry
 from t6.registry import Registered
 from t6.registry.sqlite import SqliteProjectRegistry
 from t6.server.app import Request, Response
-from t6.server.http import CATALOG_BODY_BYTES, CATALOG_SNAPSHOT_PATH, make_server
+from t6.server.http import TAILNET_BODY_LIMITS, make_server
 from t6.server.queue import JobQueue
 from t6.server.verbs import VerbAPI
 from t6.verbs import Done, Preview
@@ -101,9 +101,7 @@ class SyntheticAPI:
         self.server = server = make_server(
             ("127.0.0.1", self.port),
             self.handle,
-            body_limits={
-                CATALOG_SNAPSHOT_PATH: CATALOG_BODY_BYTES
-            },  # as the t6 tailnet listener does
+            body_limits=TAILNET_BODY_LIMITS,  # as the t6 tailnet listener does
         )
         self.port = server.server_port
         self.thread = threading.Thread(target=server.serve_forever, daemon=True)

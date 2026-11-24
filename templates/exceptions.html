@@ -1,7 +1,30 @@
 {% extends "base.html" %}
-{% block title %}Import exceptions{% endblock %}
+{% block title %}Exceptions{% endblock %}
 {% block content %}
-<div class="page-head"><h1>Import exceptions</h1></div>
-<p class="lead">Rows the Drive import could not read, kept for review. The import runs with the <code>t6</code> command, not here.</p>
+<div class="page-head"><h1>Exceptions</h1></div>
+{% if flash %}<p role="status">{{ flash }}</p>{% endif %}
+<p class="lead">What needs a person: captures nobody could match, movements without a Project, rows and names the reload could not use, and T6 drives that are late. The reload runs with the <code>t6</code> command, not here.</p>
+
+<h2>Unresolved captures</h2>
+{% if captures %}<ul class="stack">{% for c in captures %}<li class="card">{% include "_capture.html" %}
+<p class="small"><a class="btn" href="/captures/{{ c.capture }}/drive">Give it a Drive</a></p></li>{% endfor %}</ul>{% else %}<div class="card empty"><p class="empty-title">No unresolved captures.</p></div>{% endif %}
+
+<h2>Needs a Project</h2>
+{% if needs_project %}<ul class="stack">{% for m in needs_project %}<li class="card" data-movement="{{ m.id }}">
+<div class="title-block"><strong>{{ m.on or 'Undated' }} · {{ m.direction }}</strong><a href="/drive/{{ m.drive }}">{{ m.label or m.drive }}</a></div>
+<p>Person: {{ m.person or 'Unknown' }} · Place: {{ m.place or 'Unknown' }}</p>
+<form class="inline" method="post" action="/movements/{{ m.id }}/project">{% include "_hidden.html" %}<label for="np-{{ m.id }}">Project</label><select id="np-{{ m.id }}" name="project">{% for p in projects %}<option value="{{ p.t6_id }}">{{ p.name }} — {{ p.project_code or 'unknown code' }} — {{ p.t6_id }}</option>{% endfor %}</select><button class="btn btn--primary">Set Project</button></form>
+</li>{% endfor %}</ul>{% else %}<div class="card empty"><p class="empty-title">No movements need a Project.</p></div>{% endif %}
+
+<h2>Overdue T6 drives</h2>
+{% if overdue %}<div class="table-scroll" role="region" aria-label="Overdue T6 drives table" tabindex="0"><table class="data"><thead><tr><th>Drive</th><th>Serial</th><th>Person</th><th>Released</th><th>Days out</th></tr></thead><tbody>{% for o in overdue %}<tr><td><a href="/drive/{{ o.drive_id }}">{{ o.label or o.drive_id }}</a></td><td>{{ o.serial or '' }}</td><td>{{ o.person or 'Unknown' }}</td><td>{{ o.released_on }}</td><td class="num">{{ o.days_out }} days</td></tr>{% endfor %}</tbody></table></div>{% else %}<div class="card empty"><p class="empty-title">No T6 drives are overdue.</p></div>{% endif %}
+
+<h2>Last reload</h2>
+{% if report %}<p class="muted">Reloaded {{ report.at }}: {{ report.rows_read }} rows read, {{ report.drives }} Drives, {{ report.movements_unmatched }} movements not matched to a Drive.</p>
+<h3>Unmapped Project names</h3>
+{% if report.unmapped_projects %}<ul class="plain">{% for name in report.unmapped_projects %}<li>{{ name }}</li>{% endfor %}</ul>{% else %}<div class="card empty"><p class="empty-title">Every Project name is mapped.</p></div>{% endif %}
+{% else %}<div class="card empty"><p class="empty-title">No reload has run.</p></div>{% endif %}
+
+<h3>Rows the reload could not load</h3>
 {% if exceptions %}<div class="table-scroll" role="region" aria-label="Import exceptions table" tabindex="0"><table class="data"><thead><tr><th>Workbook</th><th>Sheet</th><th>Row</th><th>Reason</th><th>Detail</th></tr></thead><tbody>{% for x in exceptions %}<tr><td>{{ x.workbook }}</td><td>{{ x.sheet }}</td><td class="num">{{ x.row }}</td><td>{{ x.reason }}</td><td>{{ x.detail }}</td></tr>{% endfor %}</tbody></table></div>{% else %}<div class="card empty"><p class="empty-title">No import exceptions.</p></div>{% endif %}
 {% endblock %}

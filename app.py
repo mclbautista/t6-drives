@@ -1,18 +1,25 @@
 """The Drive web app: a client of the t6 API. It owns no records."""
 
+import base64
+import binascii
 import logging
 import math
+import re
 import secrets
 from collections.abc import Mapping
 from typing import Any
 
-from flask import Flask, abort, redirect, render_template, request, session
+from flask import Flask, Response, abort, redirect, render_template, request, session
 from t6.client import Client
 from t6.verbs import (
+    DriveCaptureListInput,
+    DriveCaptureReadInput,
     DriveExceptionsInput,
     DriveGetInput,
     DriveListInput,
+    DriveOverdueInput,
     DriveProjectsInput,
+    DriveReloadReportInput,
     MovementListInput,
     Refused,
 )
@@ -57,6 +64,13 @@ LABELS = {
     "office_location": "Office location",
     "qr_code": "QR code",
 }
+PLACES = ("TABLE", "CABINET", "SHELF", "BOX")
+KEEP = "keep"  # a select choice that sends nothing for that fact
+ID = re.compile(
+    r"[A-Za-z0-9_-]{1,80}"
+)  # what an ID in a path may look like; the API judges the rest
+PHOTO_TYPES = ("image/png", "image/jpeg", "image/webp")
+PICKS = 20  # Drives offered when a capture is given one
 
 
 def create_app(
@@ -234,7 +248,7 @@ def create_app(
     def movements_page():
         filters: dict[str, Any] = {
             name: request.args.get(name, "").strip() or None
-            for name in ("project", "person", "q", "start", "end")
+            for name in ("project", "drive", "person", "q", "start", "end")
         }
         listed = gateway.read("movement_list", MovementListInput(**filters))
         return render_template(
@@ -365,7 +379,27 @@ def create_app(
             projects=gateway.projects(),
             display=display,
             roles=DRIVE_ROLES,
+            places=PLACES,
         )
+
+    @app.post("/drive/<drive_id>/place")
+    def set_place(drive_id):
+        """Place and T6 ownership: two facts changed through `drive edit`, nothing else on the Drive."""
+        back = "/drive/" + drive_id
+        values: dict[str, Any] = {"drive": drive_id}
+        place = request.form.get("place", KEEP)
+        if place in ("", *PLACES):
+            values["office_location"] = place
+        elif place != KEEP:
+            return notice("Choose TABLE, CABINET, SHELF, BOX or no place.", back), 400
+        if "ownership" in request.form:
+            ownership = request.form["ownership"]
+            if ownership not in ("t6", "unknown"):
+                return notice("Choose T6 or unknown ownership.", back), 400
+            values["ownership_known"] = ownership == "t6"
+        values["expected_version"] = request.form.get("expected_version", "").strip() or None
+        outcome = gateway.submit("drive_edit", values, posted_key(request.form))
+        return finish(outcome, lambda done: back, lambda error: notice(error, back))
 
     @app.post("/drive/<drive_id>/assignments")
     def add_assignment(drive_id):
@@ -413,10 +447,175 @@ def create_app(
     register_catalog(app, gateway, csrf)
     register_shipments(app, gateway, csrf)
 
+    def movement_log() -> list[dict[str, Any]]:
+        return list(gateway.read("movement_list", MovementListInput())["movements"])
+
+    def correction_page(
+        movement: Mapping[str, Any], values: Mapping[str, str], error: str | None = None
+    ) -> str:
+        return render_template(
+            "correction.html",
+            m=movement,
+            values=values,
+            error=error,
+            projects=gateway.projects(),
+            places=PLACES,
+            keep=KEEP,
+            display=gateway.project_display,
+            csrf=csrf(),
+            new_key=new_key,
+        )
+
+    def original_of(movement_id: str) -> dict[str, Any]:
+        if not ID.fullmatch(movement_id):
+            abort(404)
+        found = next((m for m in movement_log() if m["id"] == movement_id), None)
+        if found is None:
+            abort(404)
+        return found
+
+    @app.route("/movements/<movement_id>/correct", methods=["GET", "POST"])
+    def correct_movement(movement_id):
+        """A correction is a new entry; the original stays. Only what differs from the original is sent."""
+        original = original_of(movement_id)
+        form = request.form
+        if request.method == "GET":
+            return correction_page(
+                original,
+                {
+                    "drive": original["drive"] or "",
+                    "on": original["on"] or "",
+                    "direction": original["direction"],
+                    "person": original["person"] or "",
+                },
+            )
+        values: dict[str, Any] = {"movement": movement_id}
+        for name in ("drive", "on", "person"):
+            typed = form.get(name, "").strip()
+            if typed and typed != (original[name] or ""):
+                values[name] = typed
+        if form.get("direction") in ("IN", "OUT") and form["direction"] != original["direction"]:
+            values["direction"] = form["direction"]
+        place = form.get("place", KEEP)
+        if place == "none" and original["place"] is not None:
+            values["place"] = None
+        elif place in PLACES and place != original["place"]:
+            values["place"] = place
+        project = form.get("project", KEEP).strip()
+        if project not in ("", KEEP):
+            values["project"] = project
+        outcome = gateway.submit("movement_correct", values, posted_key(form))
+
+        def again(error: str) -> str:
+            return correction_page(original, form, error)
+
+        return finish(
+            outcome,
+            lambda done: "/movements?drive=" + (done.result["movement"]["drive"] or ""),
+            again,
+            missing_is_404=False,
+        )
+
+    @app.post("/movements/<movement_id>/project")
+    def set_movement_project(movement_id):
+        """The needs-a-Project list: the Project is a correction that changes nothing else."""
+        if not ID.fullmatch(movement_id):
+            abort(404)
+        values = {"movement": movement_id, "project": request.form.get("project", "").strip()}
+        outcome = gateway.submit("movement_correct", values, posted_key(request.form))
+        return finish(
+            outcome,
+            lambda done: "/exceptions",
+            lambda error: notice(error, "/exceptions", "Exceptions"),
+            missing_is_404=False,
+        )
+
+    def unresolved_capture(capture_id: str) -> dict[str, Any]:
+        if not ID.fullmatch(capture_id):
+            abort(404)
+        listed = gateway.read("drive_capture_list", DriveCaptureListInput())["captures"]
+        found = next((c for c in listed if c["capture"] == capture_id), None)
+        if found is None:
+            abort(404)
+        return found
+
+    @app.get("/captures/<capture_id>/photo")
+    def capture_photo(capture_id):
+        """The photo of a capture, read from the API for this one request: never stored or logged here."""
+        if not ID.fullmatch(capture_id):
+            abort(404)
+        try:
+            read = gateway.read("drive_capture_photo", DriveCaptureReadInput(capture=capture_id))
+            data = base64.b64decode(read["photo"], validate=True)
+        except ApiRefused as error:
+            if error.rule == "capture":
+                abort(404)
+            raise
+        except (binascii.Error, KeyError, TypeError):
+            raise ApiUnavailable from None
+        if read.get("media_type") not in PHOTO_TYPES:
+            raise ApiUnavailable
+        return Response(
+            data,
+            mimetype=read["media_type"],
+            headers={
+                "Cache-Control": "no-store",
+                "X-Content-Type-Options": "nosniff",
+                "Content-Security-Policy": "default-src 'none'; sandbox",
+            },
+        )
+
+    @app.route("/captures/<capture_id>/drive", methods=["GET", "POST"])
+    def give_capture_a_drive(capture_id):
+        capture = unresolved_capture(capture_id)
+        if request.method == "GET":
+            q = request.args.get("q", "").strip()
+            drives = gateway.read("drive_list", DriveListInput(q=q or None, limit=PICKS))["drives"]
+            return render_template(
+                "capture_drive.html",
+                capture=capture,
+                q=q,
+                drives=drives,
+                csrf=csrf(),
+                new_key=new_key,
+            )
+        drive = request.form.get("drive", "").strip()
+        outcome = gateway.submit(
+            "drive_capture", {"capture": capture_id, "drive": drive}, posted_key(request.form)
+        )
+
+        def done(_: Any) -> str:
+            session["flash"] = f"Capture given to Drive {drive}. It becomes a movement shortly."
+            return "/exceptions"
+
+        return finish(
+            outcome,
+            done,
+            lambda error: notice(error, request.path, "Pick a Drive"),
+            missing_is_404=False,
+        )
+
     @app.get("/exceptions")
     def exceptions():
-        listed = gateway.read("drive_exceptions", DriveExceptionsInput())["exceptions"]
-        return render_template("exceptions.html", exceptions=listed)
+        reads = gateway.read
+        captures = reads("drive_capture_list", DriveCaptureListInput())["captures"]
+        needs_project = reads("movement_list", MovementListInput(needs_project=True))["movements"]
+        rows = reads("drive_exceptions", DriveExceptionsInput())["exceptions"]
+        report = reads("drive_reload_report", DriveReloadReportInput())["report"]
+        overdue = reads("drive_overdue", DriveOverdueInput())["overdue"]
+        return render_template(
+            "exceptions.html",
+            captures=captures,
+            needs_project=sorted(needs_project, key=lambda m: m["on"] or "", reverse=True),
+            exceptions=rows,
+            report=report,
+            overdue=overdue,
+            flash=session.pop("flash", None),
+            projects=gateway.projects(),
+            display=gateway.project_display,
+            csrf=csrf(),
+            new_key=new_key,
+        )
 
     @app.get("/outbox")
     def show_outbox():

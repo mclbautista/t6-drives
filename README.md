@@ -44,7 +44,10 @@ Check: open it from another office machine, which works; a request whose `Host` 
 | `/drive/<id>/custody` (legacy direct URL) | `drive receive`, `drive return`, `drive retire` |
 | `/shipments/new` | `drive release` (with a reason and a free-text recipient) |
 | `/shipments`, `/shipments/<id>` | `drive shipments`, `drive shipment` (the manifest shows the facts stored at release) |
-| `/exceptions` | `drive exceptions` |
+| `/movements/<id>/correct` | `movement list`, `movement correct` (a correction is a new entry; the original stays in the log, with a link each way) |
+| `/drive/<id>/place` | `drive edit` (place TABLE, CABINET, SHELF, BOX or none, and T6 ownership; the search line shows both) |
+| `/exceptions` | `drive capture list` (unresolved captures with text and photo), `drive capture photo`, `drive capture` with a Drive, `movement list` (needs a Project) and `movement correct` (set it), `drive overdue`, `drive reload report` (unmapped Project names), `drive exceptions` (rows the reload could not load) |
+| `/captures/<id>/photo`, `/captures/<id>/drive` | `drive capture photo`, `drive list` and `drive capture` (pick a Drive for an unresolved capture) |
 | `/outbox` | writes waiting for the API, or refused by it |
 | `/health` | none (process readiness) |
 
@@ -76,5 +79,7 @@ TRANSMITTAL; the legacy custody and release URLs remain available directly. Proj
 pages show API reads, with movement logs newest first. Retire remains linked from each Drive.
 Every rendered page uses the API's practice flag for its practice banner; no flag is guessed when
 the API is unavailable.
+
+A capture photo is read from the API for each request and passed on to the browser with `Cache-Control: no-store`; the app never writes it to disk or logs it, and sends it nowhere else. Like every page, it is open to anyone who can reach the app on the office network.
 
 Search sends the typed text to `drive list`, which matches label, serial and Project code; each result line shows the status, `place` and `holder` the API returns, and nothing is derived in the app.

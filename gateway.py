@@ -16,6 +16,7 @@ from t6.verbs import (
     Done,
     DriveAddInput,
     DriveAssignInput,
+    DriveCaptureInput,
     DriveCatalogSnapshotInput,
     DriveEditInput,
     DrivePromoteSerialInput,
@@ -24,6 +25,7 @@ from t6.verbs import (
     DriveRetireInput,
     DriveReturnInput,
     DriveUnassignInput,
+    MovementCorrectInput,
     NeedsPerson,
     Outcome,
     Preview,
@@ -45,6 +47,9 @@ WRITES: dict[str, type[BaseModel]] = {
     "drive_retire": DriveRetireInput,
     "drive_release": DriveReleaseInput,
     "drive_catalog_snapshot": DriveCatalogSnapshotInput,
+    "movement_correct": MovementCorrectInput,
+    # Giving an unresolved capture a Drive has no preview: the API answers done at once, and the same call is the same write.
+    "drive_capture": DriveCaptureInput,
 }
 # A scan carries its whole manifest, which the Outbox page would print and rewrite on every change, so a scan the API
 # cannot take is not queued: the custodian uploads it again, and the same form key keeps it one write.

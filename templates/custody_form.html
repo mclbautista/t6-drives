@@ -1,8 +1,9 @@
 {% extends "base.html" %}
-{% block title %}Record custody{% endblock %}
+{% set retiring = request.path.endswith("/retire") %}
+{% block title %}{{ "Retire Drive" if retiring else "Record custody" }}{% endblock %}
 {% block content %}
-<div class="page-head"><div><h1>Record custody</h1><p class="sub">Drive <span class="mono">{{ drive_id }}</span></p></div></div>
-<p class="lead">Events are recorded as the Person the t6 API authenticates. A release belongs to a shipment.</p>
+<div class="page-head"><div><h1>{{ "Retire Drive" if retiring else "Record custody" }}</h1><p class="sub">Drive <span class="mono">{{ drive_id }}</span></p></div></div>
+{% if not retiring %}<p class="lead">Events are recorded as the Person the t6 API authenticates. A release belongs to a shipment.</p>{% endif %}
 <div class="form-card">
 <form method="post">
 {% include "_hidden.html" %}
@@ -11,11 +12,11 @@
 <div class="field"><label for="f-on">Business date (blank = today)</label><input id="f-on" name="on" type="date"></div>
 <div class="field field--wide"><label for="f-project">Project</label><select id="f-project" name="project">{% for p in projects %}<option value="{{ p.t6_id }}">{{ p.name }} — {{ p.project_code or 'unknown code' }} — {{ p.t6_id }}</option>{% endfor %}</select></div>
 </div></fieldset>
-<fieldset><legend>Party</legend><div class="fields">
+{% if not retiring %}<fieldset><legend>Party</legend><div class="fields">
 <div class="field"><label for="f-party-kind">Existing party kind</label><select id="f-party-kind" name="party_kind"><option value="">No party</option><option>contact</option><option>studio</option></select></div>
 <div class="field"><label for="f-party">Party (page ID or name)</label><input id="f-party" name="party"></div>
 </div></fieldset>
-<fieldset><legend>Reason</legend><div class="fields">
+{% endif %}<fieldset><legend>Reason</legend><div class="fields">
 <div class="field field--wide"><label for="f-reason">Reason (required for retirement)</label><input id="f-reason" name="reason"></div>
 </div></fieldset>
 <div class="form-actions"><button class="btn btn--primary">Append custody event</button><a class="btn btn--quiet" href="/drive/{{ drive_id }}">Cancel</a></div>

@@ -116,8 +116,18 @@ def create_app(
 
     @app.before_request
     def retry_queued_writes():
+        gateway.practice.set(None)
         if request.path != "/health":
             gateway.retry()
+
+    @app.context_processor
+    def practice_banner():
+        if gateway.practice.get() is None:
+            try:
+                gateway.read("drive_list", DriveListInput(limit=1))
+            except (ApiUnavailable, ApiRefused):
+                pass  # An unavailable API cannot supply the practice flag.
+        return {"practice": gateway.practice.get()}
 
     @app.get("/health")
     def health():
@@ -228,10 +238,26 @@ def create_app(
     def drive_record(drive_id: str) -> dict[str, Any]:
         return gateway.read("drive_get", DriveGetInput(drive=drive_id))["drive"]
 
+    def serial_page():
+        return render_template("serial_form.html", csrf=csrf(), new_key=new_key)
+
     @app.route("/new", methods=["GET", "POST"])
     def new_drive():
         if request.method == "GET":
-            return form_page(None, {})
+            return serial_page()
+        serial = request.form.get("serial", "").strip()
+        if serial:
+            try:
+                matches = gateway.read("drive_list", DriveListInput(serial=serial))["drives"]
+            except ApiUnavailable:
+                if "label" not in request.form:
+                    raise
+                # A completed form can still queue drive add; the API judges duplicates on retry.
+            else:
+                if matches:
+                    return redirect("/drive/" + matches[0]["id"], code=303)
+        if "label" not in request.form:
+            return form_page(None, {"serial": serial})
         try:
             values = facts(request.form)
         except ValueError as error:

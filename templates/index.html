@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 {% from "_macros.html" import status_badge, review_chip %}
-{% block title %}Inventory{% endblock %}
+{% block title %}Search{% endblock %}
 {% macro href(over) -%}
 {%- set pairs = dict(request.args.to_dict(), **over).items()|selectattr("1")|list -%}
 /{% if pairs %}?{% for k, v in pairs %}{{ k|urlencode }}={{ v|urlencode }}{% if not loop.last %}&amp;{% endif %}{% endfor %}{% endif %}
@@ -9,17 +9,19 @@
 {% set current = request.args.get("status", "") %}
 {% set reviewing = request.args.get("review", "") %}
 <div class="page-head">
-<h1>Inventory</h1>
+<h1>Search</h1>
 <div class="actions"><a class="btn" href="/new">New Drive</a></div>
 </div>
-<form class="filters card">
+<form class="card search">
 <div class="field"><label for="f-q">Search</label><input id="f-q" name="q" value="{{ q }}"></div>
+<details><summary>More filters</summary><div class="filters">
 <div class="field"><label for="f-serial">Exact accepted serial</label><input id="f-serial" name="serial" value="{{ request.args.get('serial', '') }}"></div>
 <div class="field"><label for="f-office">Office location</label><input id="f-office" name="office_location" value="{{ request.args.get('office_location', '') }}"></div>
 <div class="field"><label for="f-review">Review</label><select id="f-review" name="review"><option value="">All</option><option value="yes" {% if reviewing == "yes" %}selected{% endif %}>Needs review</option><option value="no" {% if reviewing == "no" %}selected{% endif %}>Not flagged</option></select></div>
 <div class="field"><label for="f-project">Project (open use)</label><select id="f-project" name="project"><option value="">All Projects</option>{% for p in projects %}<option value="{{ p.t6_id }}" {% if project == p.t6_id %}selected{% endif %}>{{ p.name }} — code: {{ p.project_code or 'unknown' }} — {{ p.t6_id }}</option>{% endfor %}</select></div>
 <div class="field"><label for="f-status">Status</label><select id="f-status" name="status" aria-label="Status"><option value="">All</option>{% for choice in ["unknown", "in custody", "released", "retired"] %}<option {% if status == choice %}selected{% endif %}>{{ choice }}</option>{% endfor %}</select></div>
-<div class="field field--action"><button class="btn btn--primary">Find</button></div>
+</div></details>
+<div class="form-actions"><button class="btn btn--primary">Find</button></div>
 </form>
 <div class="toolbar">
 <div class="chips" role="group" aria-label="Quick filters">
@@ -35,12 +37,12 @@
 <ul class="drives">{% for d in drives %}<li><a class="c-id mono" href="/drive/{{ d.id }}">{{ d.id }}</a>
 <div class="c-name">{% if d.label %}<strong>{{ d.label }}</strong>{% endif %}{% if d.description %}<span class="muted">{{ d.description }}</span>{% endif %}{% if d.office_location %}<span class="muted c-place">{{ d.office_location }}</span>{% endif %}{% if not d.label and not d.description %}<span class="muted">No label</span>{% endif %}</div>
 <div class="c-serial">{% if d.serial %}<span class="serial"><span class="vh">Accepted: {{ d.serial }}</span><span aria-hidden="true">{{ d.serial }}</span></span>{% endif %}{% if d.suspected_serial %}<span class="serial serial--suspected">Suspected (uncertain): {{ d.suspected_serial }}</span>{% endif %}{% if not d.serial and not d.suspected_serial %}<span class="vh">No serial</span><span class="muted" aria-hidden="true">&mdash;</span>{% endif %}</div>
-<div class="c-status">{{ status_badge(d.status) }}{% if d.needs_review %}{{ review_chip() }}{% endif %}</div>
+<div class="c-status">{{ status_badge(d.status) }}{% if d.holder %}<span class="muted c-holder">{{ d.holder }}</span>{% endif %}{% if d.needs_review %}{{ review_chip() }}{% endif %}</div>
 <div class="c-use"><span class="cell-label" aria-hidden="true">Open Project use</span>{% if d.open_assignments %}<span class="vh">Open Project use: </span>{% for a in d.open_assignments %}<span class="use"><span class="use-project">{{ display(a.project) }}</span> <span class="muted">({{ a.label or 'no label' }}, {{ a.role or 'unknown role' }}, from {{ a.start or 'unknown date' }})</span></span>{% endfor %}{% else %}<span class="muted"><span class="vh">Open Project use: none</span><span aria-hidden="true">None</span></span>{% endif %}</div>
 </li>{% endfor %}</ul>
 </div>
 {% if total_pages > 1 %}
-<nav class="pager" aria-label="Inventory pages">
+<nav class="pager" aria-label="Search pages">
 {% if page > 1 %}<a class="btn" href="{{ href({'page': '' if page == 2 else (page - 1)|string}) }}">Previous</a>{% else %}<span class="btn is-disabled" aria-disabled="true">Previous</span>{% endif %}
 <span class="pager-info muted">Page {{ page }} of {{ total_pages }}</span>
 {% if page < total_pages %}<a class="btn" href="{{ href({'page': (page + 1)|string}) }}">Next</a>{% else %}<span class="btn is-disabled" aria-disabled="true">Next</span>{% endif %}

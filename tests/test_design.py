@@ -4,7 +4,7 @@ import unittest
 
 from support import DriveAppCase
 
-NAV = ("Inventory", "Shipments", "Exceptions", "Outbox", "Release shipment")
+NAV = ("Search", "Projects", "Movements", "Exceptions", "Outbox")
 
 
 class DesignTests(DriveAppCase):
@@ -45,3 +45,13 @@ class DesignTests(DriveAppCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class SearchNavigationTests(DriveAppCase):
+    def test_recording_leaves_navigation_and_retire_stays_on_the_drive(self):
+        drive = self.api.add_drive(label="Synthetic navigation drive")
+        html = self.text(f"/drive/{drive}")
+        self.assertNotIn(">Record custody</a>", html)
+        self.assertNotIn(">Release shipment</a>", html)
+        self.assertIn(f'href="/drive/{drive}/retire"', html)
+        self.assertIn(">Retire</a>", html)

@@ -61,7 +61,7 @@ class SyntheticAPI:
         self.api = VerbAPI(
             people,
             JobQueue(directory + "/queue"),
-            {SECRET: custodian},
+            {SECRET: custodian, "synthetic-operator-secret": boss},
             lambda _: self.notion.client(),
             privacy_registry=Registry(people=[Person(name="Invented Client")]),
             data_sources={"projects": "projects"},

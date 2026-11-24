@@ -7,7 +7,7 @@
 <h1>Drive {{ d.id }}</h1>
 <div class="badges">{{ status_badge(d.status) }}{% if d.needs_review %}{{ review_chip() }}{% endif %}</div>
 </div>
-<div class="actions"><a class="btn" href="/drive/{{ d.id }}/catalog">Contents</a><a class="btn" href="/drive/{{ d.id }}/qr">QR label</a><a class="btn" href="/drive/{{ d.id }}/edit">Edit</a><a class="btn btn--primary" href="/drive/{{ d.id }}/custody">Record custody</a></div>
+<div class="actions"><a class="btn" href="/drive/{{ d.id }}/catalog">Contents</a><a class="btn" href="/drive/{{ d.id }}/qr">QR label</a><a class="btn" href="/drive/{{ d.id }}/edit">Edit</a><a class="btn btn--primary" href="/drive/{{ d.id }}/retire">Retire</a></div>
 </div>
 <div class="cols">
 <div class="stack">

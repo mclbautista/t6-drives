@@ -63,11 +63,35 @@ class BrowserTest(DriveAppCase):
     def tearDown(self):
         self.assertEqual(self.errors, [])
 
+    def test_search_and_new_drive_at_phone_and_desktop_width(self):
+        drive = self.api.add_drive(
+            label="Synthetic phone master " + "x" * 100,
+            serial="SYN-PHONE-" + "9" * 80,
+            office_location="Synthetic shelf " + "z" * 100,
+        )
+        for width in (375, 1280):
+            self.page.set_viewport_size({"width": width, "height": 900})
+            self.page.goto(self.base + "/")
+            expect(self.page.locator("main input:visible")).to_have_count(1)
+            self.page.get_by_label("Search", exact=True).fill("phone master")
+            self.page.get_by_role("button", name="Find", exact=True).click()
+            expect(self.page.get_by_role("link", name=drive, exact=True)).to_be_visible()
+            for path in ("/", "/new", f"/drive/{drive}", f"/drive/{drive}/retire"):
+                self.page.goto(self.base + path)
+                self.assertLessEqual(
+                    self.page.evaluate("document.documentElement.scrollWidth"), width, path
+                )
+            self.page.goto(self.base + "/new")
+            self.page.get_by_label("Accepted serial", exact=True).fill("SYN-PHONE-" + "9" * 80)
+            self.page.get_by_role("button", name="Continue", exact=True).click()
+            expect(self.page).to_have_url(self.base + "/drive/" + drive)
+
     def test_create_search_edit_promote_assign_and_record_custody(self):
         project = self.api.project("Synthetic show")
         page = self.page
         page.goto(self.base + "/")
         page.get_by_role("link", name="New Drive").click()
+        page.get_by_role("button", name="Continue", exact=True).click()
         expect(page.get_by_label("Ownership", exact=True)).to_have_value("unknown")
         page.get_by_label("Label", exact=True).fill("synthetic browser drive")
         page.get_by_label("Suspected serial (uncertain)", exact=True).fill("browser candidate")
@@ -76,11 +100,12 @@ class BrowserTest(DriveAppCase):
         expect(page.get_by_text("Unknown ownership", exact=True)).to_be_visible()
         drive_id = page.url.rsplit("/", 1)[-1]
         self.assertRegex(drive_id, r"^t6d_[0-9a-f]{32}$")
-        page.get_by_role("link", name="Inventory", exact=True).click()
+        page.get_by_role("link", name="Search", exact=True).click()
         page.get_by_label("Search", exact=True).fill("browser candidate")
         page.get_by_role("button", name="Find", exact=True).click()
         expect(page.get_by_text("Suspected (uncertain): BROWSER CANDIDATE")).to_be_visible()
         page.get_by_label("Search", exact=True).fill("")
+        page.get_by_text("More filters", exact=True).click()
         page.get_by_label("Exact accepted serial", exact=True).fill("browser candidate")
         page.get_by_role("button", name="Find", exact=True).click()
         expect(page.get_by_role("link", name=drive_id, exact=True)).to_have_count(0)
@@ -102,16 +127,17 @@ class BrowserTest(DriveAppCase):
         page.get_by_label("End date", exact=True).first.fill("2026-11-05")
         page.get_by_role("button", name="End Assignment", exact=True).click()
         expect(page.get_by_text("End: 2026-11-05", exact=False)).to_be_visible()
-        page.get_by_role("link", name="Record custody", exact=True).click()
+        page.goto(f"{self.base}/drive/{drive_id}/custody")
         for kind, status in (("received", "in custody"), ("retired", "retired")):
             page.get_by_label("Kind", exact=True).select_option(kind)
             page.get_by_label("Reason", exact=False).fill("synthetic lost")
             page.get_by_role("button", name="Append custody event").click()
             expect(page.get_by_text("Custody status: " + status, exact=True)).to_be_visible()
             if kind == "received":
-                page.get_by_role("link", name="Record custody", exact=True).click()
+                page.get_by_role("link", name="Retire", exact=True).click()
         expect(page.locator("li[data-event-number]")).to_have_count(2)
-        page.get_by_role("link", name="Inventory", exact=True).click()
+        page.get_by_role("link", name="Search", exact=True).click()
+        page.get_by_text("More filters", exact=True).click()
         page.get_by_label("Status", exact=True).select_option("retired")
         page.get_by_role("button", name="Find", exact=True).click()
         expect(page.get_by_text("synthetic corrected label", exact=False)).to_be_visible()
@@ -119,6 +145,7 @@ class BrowserTest(DriveAppCase):
     def test_qr_label_scan_lookup_and_dated_catalog(self):
         page = self.page
         page.goto(self.base + "/new")
+        page.get_by_role("button", name="Continue", exact=True).click()
         page.get_by_label("Label", exact=True).fill("Synthetic shelf drive")
         page.get_by_label("Office location", exact=True).fill("Office A / Shelf 1")
         page.get_by_label("QR code", exact=True).fill("shelf-1")
@@ -132,6 +159,7 @@ class BrowserTest(DriveAppCase):
         page.goto(self.base + "/qr/shelf-1")  # what scanning the printed label opens
         self.assertTrue(page.url.endswith("/drive/" + drive_id))
         page.goto(self.base + "/")
+        page.get_by_text("More filters", exact=True).click()
         page.get_by_label("Office location", exact=True).fill("shelf 1")
         page.get_by_role("button", name="Find", exact=True).click()
         expect(page.get_by_role("link", name=drive_id, exact=True)).to_be_visible()
@@ -176,7 +204,7 @@ class BrowserTest(DriveAppCase):
         self.api.add_drive(label="synthetic second")
         page = self.page
         page.goto(self.base + "/")
-        page.get_by_role("link", name="Release shipment", exact=True).click()
+        page.goto(self.base + "/shipments/new")
         page.locator(f'input[name="drive_id"][value="{first}"]').check()
         page.get_by_label("Existing party kind").select_option("studio")
         page.get_by_label("Party (page ID or name)").fill("Invented Studio")
@@ -188,9 +216,10 @@ class BrowserTest(DriveAppCase):
         page.evaluate("window.print = () => { window.printed = true }")
         page.get_by_role("button", name="Print manifest", exact=True).click()
         self.assertTrue(page.evaluate("window.printed"))
-        page.get_by_role("link", name="Shipments", exact=True).click()
+        page.goto(self.base + "/shipments")
         expect(page.get_by_text("Invented Studio", exact=False)).to_be_visible()
-        page.get_by_role("link", name="Inventory", exact=True).click()
+        page.get_by_role("link", name="Search", exact=True).click()
+        page.get_by_text("More filters", exact=True).click()
         page.get_by_label("Status", exact=True).select_option("released")
         page.get_by_role("button", name="Find", exact=True).click()
         expect(page.get_by_role("link", name=first, exact=True)).to_be_visible()
@@ -198,6 +227,7 @@ class BrowserTest(DriveAppCase):
     def test_a_write_made_while_the_api_is_down_is_queued_and_lands_once_after_recovery(self):
         page = self.page
         page.goto(self.base + "/new")
+        page.get_by_role("button", name="Continue", exact=True).click()
         page.get_by_label("Label", exact=True).fill("synthetic queued drive")
         self.api.stop()
         page.get_by_role("button", name="Save", exact=True).click()

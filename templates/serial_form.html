@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+{% block title %}New Drive{% endblock %}
+{% block content %}
+<div class="page-head"><h1>New Drive</h1></div>
+<div class="form-card">
+<p>Enter the serial first. If it is already registered, its Drive will open.</p>
+<form method="post">
+{% include "_hidden.html" %}
+<div class="field"><label for="serial">Accepted serial</label><input id="serial" name="serial" autofocus></div>
+<p class="muted small">Leave it blank if the serial is unknown.</p>
+<div class="form-actions"><button class="btn btn--primary">Continue</button><a class="btn btn--quiet" href="/">Cancel</a></div>
+</form>
+</div>
+{% endblock %}

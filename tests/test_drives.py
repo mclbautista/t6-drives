@@ -100,18 +100,18 @@ class NewDriveTests(DriveAppCase):
         self.assertEqual(self.api.drives(), [])
 
     def test_the_apis_refusal_is_shown_on_the_form_with_what_was_typed(self):
-        response = self.submit("/new", description="no label", brand="Typed Brand")
+        response = self.submit("/new", label="", description="no label", brand="Typed Brand")
         html = response.get_data(as_text=True)
         self.assertEqual(response.status_code, 400)
         self.assertIn('<p role="alert">A Drive needs a label</p>', html)
         self.assertIn('value="Typed Brand"', html)
         self.assertEqual(self.api.drives(), [])
 
-    def test_a_serial_already_recorded_is_refused_naming_the_drive_that_holds_it(self):
+    def test_a_serial_already_recorded_opens_the_drive_that_holds_it(self):
         held = self.api.add_drive(label="Holder", serial="SYN-1")
         response = self.submit("/new", label="Second", serial="syn-1")
-        self.assertEqual(response.status_code, 400)
-        self.assertIn(held, response.get_data(as_text=True))
+        self.assertEqual(response.status_code, 303)
+        self.assertEqual(response.headers["Location"], "/drive/" + held)
         self.assertEqual(len(self.api.drives()), 1)
 
     def test_a_double_submit_of_one_rendered_form_is_one_drive(self):
@@ -153,7 +153,7 @@ class DriveDetailTests(DriveAppCase):
             "Needs review</dt><dd>No",
         ):
             self.assertIn(shown, html)
-        for link in ("/", f"/drive/{drive}/edit", f"/drive/{drive}/custody"):
+        for link in ("/", f"/drive/{drive}/edit", f"/drive/{drive}/retire"):
             self.assertIn(f'href="{link}"', html)
 
     def test_an_unknown_drive_is_not_found_and_so_are_its_subpages(self):

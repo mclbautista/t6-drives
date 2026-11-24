@@ -2,13 +2,19 @@
 {% block title %}Projects{% endblock %}
 {% block content %}
 <h1>Projects</h1>
+<form class="filters" method="get" action="/projects" role="search">
+<div class="field"><label for="p-q">Search</label><input id="p-q" type="search" name="q" value="{{ q }}" placeholder="Name or code"></div>
+<div class="field"><label for="p-kind">Show</label><select id="p-kind" name="kind"><option value="">All Projects</option>{% for value, text in kinds.items() %}<option value="{{ value }}" {% if kind == value %}selected{% endif %}>{{ text }}</option>{% endfor %}</select></div>
+<div class="field"><label for="p-sort">Sort</label><select id="p-sort" name="sort">{% for value, text in sorts.items() %}<option value="{{ value }}" {% if sort == value %}selected{% endif %}>{{ text }}</option>{% endfor %}</select></div>
+<div class="field"><label class="check"><input type="checkbox" name="out" value="1" {% if out %}checked{% endif %}> Has drives out</label></div>
+<div class="form-actions"><button class="btn btn--primary">Find</button>{% if filtered %}<a class="btn btn--quiet" href="/projects">Clear</a>{% endif %}</div>
+</form>
 <ul class="stack">
 {% for p in projects %}
-{% set key = p.project.page_id or p.project.text %}
-<li data-project="{{ key }}"><article class="card">
-<h2><a href="/projects/view?project={{ key|urlencode }}">{{ display(p.project) }}</a></h2>
+<li data-project="{{ p.key }}"><article class="card">
+<h2><a href="/projects/view?project={{ p.key|urlencode }}">{{ p.name }}</a></h2>
 <p>Total <span data-count="total">{{ p.total }}</span> · In-house <span data-count="in_house">{{ p.in_house }}</span> · Released <span data-count="released">{{ p.released }}</span></p>
 </article></li>
-{% else %}<li class="empty-note">No Projects with Drives.</li>{% endfor %}
+{% else %}<li class="empty-note">{% if filtered %}No Projects match.{% else %}No Projects with Drives.{% endif %}</li>{% endfor %}
 </ul>
 {% endblock %}

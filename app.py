@@ -64,6 +64,8 @@ LABELS = {
     "office_location": "Office location",
     "qr_code": "QR code",
 }
+PROJECT_SORTS = {"az": "A to Z", "out": "Most drives out", "total": "Most drives in total"}
+PROJECT_KINDS = {"registered": "Registered", "name_only": "Name only, not linked to a Project yet"}
 PLACES = ("TABLE", "CABINET", "SHELF", "BOX")
 KEEP = "keep"  # a select choice that sends nothing for that fact
 ID = re.compile(
@@ -223,9 +225,46 @@ def create_app(
 
     @app.get("/projects")
     def projects_list():
-        listed = gateway.read("drive_projects", DriveProjectsInput())
+        q = request.args.get("q", "").strip()
+        out = request.args.get("out") == "1"
+        kind = request.args.get("kind", "")
+        kind = kind if kind in PROJECT_KINDS else ""
+        sort = request.args.get("sort", "")
+        sort = sort if sort in PROJECT_SORTS else "az"
+        listed = gateway.read("drive_projects", DriveProjectsInput())["projects"]
+        codes = {p["t6_id"]: p.get("project_code") or "" for p in gateway.projects()}
+        rows = []
+        for item in listed:
+            ref = item["project"]
+            registered = ref["page_id"] is not None
+            name = gateway.project_display(ref)
+            plain = ref["text"] if ref["text"] is not None else name
+            code = codes.get(ref["page_id"], "")
+            if q and q.casefold() not in f"{plain} {code}".casefold():
+                continue
+            if out and not item["released"]:
+                continue
+            if kind and (kind == "registered") != registered:
+                continue
+            rows.append(
+                {**item, "key": ref["page_id"] or ref["text"], "name": name, "plain": plain}
+            )
+        ordering = {
+            "az": lambda r: (r["plain"].casefold(),),
+            "out": lambda r: (-r["released"], r["plain"].casefold()),
+            "total": lambda r: (-r["total"], r["plain"].casefold()),
+        }
+        rows.sort(key=ordering[sort])
         return render_template(
-            "projects.html", projects=listed["projects"], display=gateway.project_display
+            "projects.html",
+            projects=rows,
+            q=q,
+            out=out,
+            kind=kind,
+            sort=sort,
+            sorts=PROJECT_SORTS,
+            kinds=PROJECT_KINDS,
+            filtered=bool(q or out or kind),
         )
 
     @app.get("/projects/view")

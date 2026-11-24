@@ -208,7 +208,7 @@ class ProjectSearchTests(DriveAppCase):
     def test_sorts_order_the_list_as_named(self):
         self.build()
         plain = lambda query: [n.removeprefix("Unresolved: ") for n in self.names(query)]
-        self.assertEqual(self.names(), self.names("?sort=az"))
+        self.assertEqual(self.names(), self.names("?sort=latest"))
         self.assertEqual(
             plain("?sort=az"), ["Synthetic alpha", "Synthetic text project", "Synthetic violet"]
         )
@@ -216,6 +216,25 @@ class ProjectSearchTests(DriveAppCase):
             plain("?sort=total"), ["Synthetic alpha", "Synthetic violet", "Synthetic text project"]
         )
         self.assertEqual(plain("?sort=out")[0], "Synthetic violet")
+
+    def test_latest_movement_is_the_default_sort_newest_first_with_no_movement_last(self):
+        self.build()
+        # Alpha goes out on a recording post: a movement on 2026-11-20, newer than violet's 2026-11-03.
+        self.api.capture("OUT Invented Courier|SYN-ALPHA-0", day="2026-11-20")
+        plain = lambda query: [n.removeprefix("Unresolved: ") for n in self.names(query)]
+        self.assertEqual(
+            plain(""), ["Synthetic alpha", "Synthetic violet", "Synthetic text project"]
+        )
+        self.assertEqual(plain(""), plain("?sort=latest"))
+        self.assertIn('value="latest" selected', self.text("/projects"))
+        self.assertIn("Latest movement", self.text("/projects"))
+
+    def test_the_other_sorts_still_work_beside_the_default(self):
+        self.build()
+        self.assertEqual(
+            [n.removeprefix("Unresolved: ") for n in self.names("?sort=az")],
+            ["Synthetic alpha", "Synthetic text project", "Synthetic violet"],
+        )
 
     def test_an_unknown_sort_or_filter_value_is_ignored_and_the_form_keeps_what_was_typed(self):
         self.build()

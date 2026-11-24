@@ -30,7 +30,7 @@ Check: open it from another office machine, which works; a request whose `Host` 
 | Screen | t6 verb |
 | --- | --- |
 | `/` search and filters, with each Drive's open Project use | `drive list` |
-| `/projects` | `drive projects` (API counts, including text-only Projects), `project list` (Project codes). Search by name or code (`q`), filters has drives out (`out=1`) and Registered or Name only, not linked to a Project yet (`kind`), sorts A to Z (default), most drives out, most drives in total (`sort`); the latest-movement sort and default come with the core ticket for latest movement. |
+| `/projects` | `drive projects` (API counts, including text-only Projects), `project list` (Project codes). Search by name or code (`q`), filters has drives out (`out=1`) and Registered or Name only, not linked to a Project yet (`kind`), sorts latest movement (default, newest first, Projects with no movement last), A to Z, most drives out, most drives in total (`sort`). |
 | `/projects/view?project=<id or text>` | `drive list`, `movement list` |
 | `/movements` | `movement list` (Project, person, text and date-range filters) |
 | `/new` serial first | `drive list` (exact accepted serial), then `drive add` |

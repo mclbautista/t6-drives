@@ -10,6 +10,7 @@
 !catalog.py
 !shipments.py
 !runtime.py
+!glossary.py
 !templates/
 !templates/*.html
 !templates/*.css

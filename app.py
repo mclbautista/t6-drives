@@ -70,7 +70,20 @@ ID = re.compile(
     r"[A-Za-z0-9_-]{1,80}"
 )  # what an ID in a path may look like; the API judges the rest
 PHOTO_TYPES = ("image/png", "image/jpeg", "image/webp")
+SHEET_ID = re.compile(r"[A-Za-z0-9_-]{20,}")
 PICKS = 20  # Drives offered when a capture is given one
+
+
+def sheet_url(workbook: str) -> str | None:
+    """Where a Google Sheet opens, for a sheet problem; none for a workbook that is not a Google Sheet ID."""
+    if SHEET_ID.fullmatch(workbook):
+        return f"https://docs.google.com/spreadsheets/d/{workbook}/edit"
+    return None
+
+
+def todo_group(name: str, items: list[Any], one: str, many: str) -> dict[str, Any]:
+    """One group of the Exceptions to-do list: its name, how many items, and the count in words."""
+    return {"name": name, "count": len(items), "summary": one if len(items) == 1 else many}
 
 
 def create_app(
@@ -609,11 +622,29 @@ def create_app(
         rows = reads("drive_exceptions", DriveExceptionsInput())["exceptions"]
         report = reads("drive_reload_report", DriveReloadReportInput())["report"]
         overdue = reads("drive_overdue", DriveOverdueInput())["overdue"]
+        needs_project = sorted(needs_project, key=lambda m: m["on"] or "", reverse=True)
+        rows = [
+            {**x, "reason": glossary.plain(x["reason"]), "url": sheet_url(x["workbook"])}
+            for x in rows
+        ]
+        groups = [
+            todo_group("photos", captures, "photo to give a Drive", "photos to give a Drive"),
+            todo_group(
+                "projects",
+                needs_project,
+                "movement without a Project",
+                "movements without a Project",
+            ),
+            todo_group("rows", rows, "row to fix in the sheet", "rows to fix in the sheet"),
+            todo_group("overdue", overdue, "overdue T6 drive", "overdue T6 drives"),
+        ]
         return render_template(
             "exceptions.html",
+            groups=groups,
+            todo_total=sum(g["count"] for g in groups),
             captures=captures,
-            needs_project=sorted(needs_project, key=lambda m: m["on"] or "", reverse=True),
-            exceptions=rows,
+            needs_project=needs_project,
+            rows=rows,
             report=report,
             overdue=overdue,
             flash=session.pop("flash", None),

@@ -46,8 +46,9 @@ Check: open it from another office machine, which works; a request whose `Host` 
 | `/shipments`, `/shipments/<id>` | `drive shipments`, `drive shipment` (the manifest shows the facts stored at release) |
 | `/movements/<id>/correct` | `movement list`, `movement correct` (a correction is a new entry; the original stays in the log, with a link each way) |
 | `/drive/<id>/place` | `drive edit` (place TABLE, CABINET, SHELF, BOX or none, and T6 ownership; the search line shows both) |
-| `/exceptions` | `drive capture list` (unresolved captures with text and photo), `drive capture photo`, `drive capture` with a Drive, `movement list` (needs a Project) and `movement correct` (set it), `drive overdue`, `drive reload report` (unmapped Project names), `drive exceptions` (rows the reload could not load) |
+| `/exceptions` | a to-do list in four groups (give a photo a Drive, pick a Project, fix a row in the sheet, overdue T6 drives), each item one sentence and one button, with counts at the top: `drive capture list` (unresolved captures with text and photo), `drive capture photo`, `drive capture` with a Drive, `movement list` (needs a Project) and `movement correct` (set it), `drive overdue`, `drive reload report` (unmapped Project names), `drive exceptions` (rows the reload could not load) |
 | `/captures/<id>/photo`, `/captures/<id>/drive` | `drive capture photo`, `drive list` and `drive capture` (pick a Drive for an unresolved capture) |
+| Movement photos | a movement recorded from TRANSMITTAL shows its capture photo as a thumbnail that opens it (`drive capture photo`) |
 | `/outbox` | "Waiting to send": writes waiting for the API, or refused by it |
 | `/health` | none (process readiness) |
 

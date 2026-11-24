@@ -5,6 +5,7 @@
 <div class="title-block"><strong>{{ m.on or 'Undated' }} · {{ m.direction }}</strong>
 {% if m.drive %}<a href="/drive/{{ m.drive }}">{{ m.label or "Drive without a label" }}</a>{% else %}<span>{{ m.label or 'Unknown label' }}</span><span class="chip chip--review">Unmatched</span>{% endif %}</div>
 <p>{{ display(m.project) }} · Person: {{ m.person or 'Unknown' }} · Place: {{ m.place or 'Unknown' }}</p>
+{% include "_movement_photo.html" %}
 {% if m.description %}<p>{{ m.description }}</p>{% endif %}
 {% if m.remarks %}<p>{{ m.remarks }}</p>{% endif %}
 {% if m.corrects %}<p class="muted small"><a href="#m-{{ m.corrects }}">Correction of the earlier entry</a></p>{% endif %}

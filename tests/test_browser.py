@@ -120,7 +120,12 @@ class BrowserTest(DriveAppCase):
             self.page.goto(self.base + f"/movements?drive={drive}")
             thumb = self.page.locator(f'img[src="/movements/{movement["id"]}/photo"]')
             expect(thumb).to_be_visible()
-            self.assertGreater(thumb.evaluate("img => img.naturalWidth"), 0)
+            # The thumbnail is lazy: wait for the browser to load and decode it before looking at its size.
+            self.page.wait_for_function(
+                "src => { const i = document.querySelector(`img[src='${src}']`);"
+                " return i && i.complete && i.naturalWidth > 0; }",
+                arg=f"/movements/{movement['id']}/photo",
+            )
             self.assertLessEqual(self.page.evaluate("document.documentElement.scrollWidth"), width)
             with patch.dict(os.environ, {"T6_DRIVE_CUSTODIAN_PERSON_ID": self.api.custodian}):
                 self.page.goto(self.base + f"/movements/{movement['id']}")

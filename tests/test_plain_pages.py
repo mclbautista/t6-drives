@@ -151,6 +151,7 @@ class PlainPageCase(DriveAppCase):
             f"/movements?drive={self.moved}",
             f"/movements/{self.movement}/correct",
             f"/movements/{self.movement}",
+            "/people/new",
             "/exceptions",
             f"/captures/{self.capture}/drive",
             drive,
@@ -197,6 +198,10 @@ class EveryPageIsPlainTests(PlainPageCase):
         for label in ("Plain new label", " "):  # what will change, and a refusal
             pages.append(
                 self.submit(recycle + "/preview", form=recycle, project=self.project, label=label)
+            )
+        for name in ("Plain Newcomer", " "):  # a new person: what will change, and a refusal
+            pages.append(
+                self.submit("/people/new/preview", form="/people/new", name=name, back="/movements")
             )
         hidden = self.fields("/new")
         self.api.mode = "down"

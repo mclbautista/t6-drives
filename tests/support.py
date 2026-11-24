@@ -49,6 +49,7 @@ class SyntheticAPI:
         self.requests: list[str] = []
         self.notion = FakeNotion()
         self.notion.add_snapshot_data_source("projects", "projects")
+        self.notion.add_snapshot_data_source("contacts", "contacts")
         self.registry = SqliteProjectRegistry(directory + "/registry")
         people = People(self.registry, PreviewTokens("synthetic-signing-key"))
 
@@ -71,7 +72,7 @@ class SyntheticAPI:
             {SECRET: custodian, "synthetic-operator-secret": boss},
             lambda _: self.notion.client(),
             privacy_registry=Registry(people=[Person(name="Invented Client")]),
-            data_sources={"projects": "projects"},
+            data_sources={"projects": "projects", "contacts": "contacts"},
         )
         self.server: ThreadingHTTPServer | None = None
         self.port = 0

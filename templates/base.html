@@ -25,5 +25,30 @@
 {% if practice %}<p class="practice">Practice: records are wiped at the next reload</p>{% endif %}
 {% block content %}{% endblock %}
 </main>
+<script>
+(function () {
+  var wait;
+  document.addEventListener("input", function (event) {
+    var box = event.target;
+    if (!box.matches || !box.matches("[data-person-picker]")) return;
+    clearTimeout(wait);
+    wait = setTimeout(function () {
+      fetch("/people/find?q=" + encodeURIComponent(box.value), { headers: { Accept: "application/json" } })
+        .then(function (r) { return r.ok ? r.json() : { people: [] }; })
+        .then(function (found) {
+          var list = document.getElementById(box.getAttribute("list"));
+          list.textContent = "";
+          found.people.forEach(function (p) {
+            var option = document.createElement("option");
+            option.value = p.name;
+            if (p.handle) option.label = p.name + " (" + p.handle + ")";
+            list.appendChild(option);
+          });
+        })
+        .catch(function () {});
+    }, 150);
+  });
+})();
+</script>
 </body>
 </html>

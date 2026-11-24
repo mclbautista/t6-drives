@@ -1,0 +1,34 @@
+{% extends "base.html" %}
+{% block title %}Add new person{% endblock %}
+{% block content %}
+<div class="page-head"><h1>Add new person</h1></div>
+{% if preview %}
+<div class="form-card">
+<h2>This will change</h2>
+<ul class="stack">
+<li>{{ preview.name }} is added to Contacts.</li>
+{% if preview.telegram_handle %}<li>Telegram handle: {{ preview.telegram_handle }}</li>{% endif %}
+{% if preview.phone %}<li>Phone: {{ preview.phone }}</li>{% endif %}
+<li>The new Contact is marked “Added from Drives”, so it can be reviewed in Notion.</li>
+</ul>
+<form method="post" action="/people/new">
+<input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="key" value="{{ key }}"><input type="hidden" name="back" value="{{ back }}">
+<input type="hidden" name="name" value="{{ values.name }}"><input type="hidden" name="telegram_handle" value="{{ values.get('telegram_handle', '') }}"><input type="hidden" name="phone" value="{{ values.get('phone', '') }}">
+<div class="form-actions"><button class="btn btn--primary">Confirm and add</button><a class="btn btn--quiet" href="/people/new?back={{ back|urlencode }}">Change it</a><a class="btn btn--quiet" href="{{ back }}">Cancel</a></div>
+</form>
+</div>
+{% else %}
+<p class="lead">Add someone who is not in Contacts yet. You will see what changes before it is saved.</p>
+<div class="form-card">
+<form method="post" action="/people/new/preview">
+{% include "_hidden.html" %}<input type="hidden" name="back" value="{{ back }}">
+<div class="fields">
+<div class="field field--wide"><label for="n-name">Name</label><input id="n-name" name="name" required></div>
+<div class="field"><label for="n-handle">Telegram handle (optional)</label><input id="n-handle" name="telegram_handle"></div>
+<div class="field"><label for="n-phone">Phone (optional)</label><input id="n-phone" name="phone"></div>
+</div>
+<div class="form-actions"><button class="btn btn--primary">See what changes</button><a class="btn btn--quiet" href="{{ back }}">Cancel</a></div>
+</form>
+</div>
+{% endif %}
+{% endblock %}

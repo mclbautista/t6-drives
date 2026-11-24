@@ -53,7 +53,7 @@ class ShelfFactTests(DriveAppCase):
         self.api.add_drive(label="First", qr_code="QR-1")
         taken = self.submit("/new", label="Second", qr_code="qr-1")
         self.assertEqual(taken.status_code, 400)
-        self.assertIn("already on Drive", taken.get_data(as_text=True))
+        self.assertIn("already on a Drive", taken.get_data(as_text=True))
         unsafe = self.submit("/new", label="Third", qr_code="has space")
         self.assertEqual(unsafe.status_code, 400)
         self.assertEqual(len(self.api.drives()), 1)

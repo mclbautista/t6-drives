@@ -1,8 +1,8 @@
 {% extends "base.html" %}
-{% block title %}Contents of {{ d.id }}{% endblock %}
+{% block title %}Contents of {{ d.label or "a Drive" }}{% endblock %}
 {% block content %}
-<div class="page-head"><div class="title-block"><h1>Contents</h1><p class="muted">Drive <a class="mono" href="/drive/{{ d.id }}">{{ d.id }}</a>{% if d.label %} &middot; {{ d.label }}{% endif %}</p></div></div>
-{% if error %}<div class="banner"><p role="alert">{{ error }}</p></div>{% endif %}
+<div class="page-head"><div class="title-block"><h1>Contents</h1><p class="muted">Drive <a href="/drive/{{ d.id }}">{{ d.label or "No label" }}</a>{% if d.serial %} &middot; {{ d.serial }}{% endif %}</p></div></div>
+{% if error %}<div class="banner"><p role="alert">{{ error|plain }}</p></div>{% endif %}
 <div class="cols">
 <div class="stack">
 <section class="card">

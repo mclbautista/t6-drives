@@ -26,7 +26,9 @@ class AssignmentTests(DriveAppCase):
         for role in ("master", "backup", "offline", "swing", "archive"):
             self.assertIn(f"<option>{role}</option>", html)
         self.assertNotIn("project_text", html)
-        self.assertIn("Assignments record Project use, not physical custody.", html)
+        self.assertIn(
+            "Project use is which Project a Drive is used for, not where the Drive is.", html
+        )
 
     def test_adding_an_assignment_shows_it_with_its_project_label_role_and_dates(self):
         response = self.add(end="2026-12-01")
@@ -53,7 +55,7 @@ class AssignmentTests(DriveAppCase):
     def test_a_refusal_is_shown_with_its_reason_and_adds_nothing(self):
         self.add()
         for data, reason in (
-            ({}, "already has an open Assignment"),
+            ({}, "already has an open Project use"),
             ({"project": self.two, "label": ""}, "needs a label"),
             ({"project": self.two, "start": "not a date"}, "YYYY-MM-DD"),
             ({"project": "t6p_" + "0" * 24}, "Project"),
@@ -78,7 +80,7 @@ class AssignmentTests(DriveAppCase):
         self.assertEqual((first["end"], first["open"], second["open"]), ("2026-11-11", False, True))
         html = self.text(self.page)
         self.assertIn("End: 2026-11-11", html)
-        self.assertEqual(html.count("End Assignment</button>"), 1)
+        self.assertEqual(html.count("End Project use</button>"), 1)
         self.assertIn("Custody status: unknown", html)
         self.assertEqual(self.api.drive(self.drive)["events"], [])
 
@@ -93,7 +95,7 @@ class AssignmentTests(DriveAppCase):
         )
         again = self.submit(url, form=self.page, project=self.one, end="2026-11-12")
         self.assertEqual(again.status_code, 400)
-        self.assertIn("No open Assignment", again.get_data(as_text=True))
+        self.assertIn("No open Project use", again.get_data(as_text=True))
         self.assertEqual(self.assignments()[0]["end"], "2026-11-11")
 
     def test_a_double_submit_of_one_assignment_form_is_one_assignment(self):
@@ -107,13 +109,13 @@ class AssignmentTests(DriveAppCase):
         html = self.text(self.page)
         self.assertIn("Unresolved: SYN", html)
         self.assertIn("Label: legacy", html)
-        self.assertEqual(html.count("End Assignment</button>"), 1)
+        self.assertEqual(html.count("End Project use</button>"), 1)
         self.assertNotIn('name="project" value=', html)
         response = self.submit(f"{self.page}/assignments/1/end", form=self.page, end="2026-11-11")
         self.assertEqual((response.status_code, response.headers["Location"]), (303, self.page))
         [held] = self.assignments()
         self.assertEqual((held["end"], held["open"]), ("2026-11-11", False))
-        self.assertNotIn("End Assignment", self.text(self.page))
+        self.assertNotIn("End Project use", self.text(self.page))
 
     def test_a_remark_on_an_assignment_is_sent_and_shown(self):
         self.assertIn('name="remarks"', self.text(self.page))

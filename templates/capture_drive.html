@@ -10,7 +10,7 @@
 <div class="form-actions"><button class="btn btn--primary">Find</button></div>
 </form>
 <ul class="stack">
-{% for d in drives %}<li class="card"><div class="title-block"><strong>{{ d.label or 'No label' }}</strong><span class="mono">{{ d.id }}</span></div>
+{% for d in drives %}<li class="card"><div class="title-block"><strong>{{ d.label or 'No label' }}</strong></div>
 <p>{% if d.serial %}Serial {{ d.serial }} · {% endif %}Status: {{ d.status }}{% if d.office_location %} · Place: {{ d.office_location }}{% endif %}</p>
 <form class="inline" method="post">{% include "_hidden.html" %}<input type="hidden" name="drive" value="{{ d.id }}"><button class="btn btn--primary">Give this Drive</button></form></li>
 {% else %}<li class="empty-note">No Drives match.</li>{% endfor %}

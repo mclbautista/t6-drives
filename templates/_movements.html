@@ -3,7 +3,7 @@
 {% for m in movements %}
 <li class="card" id="m-{{ m.id }}" data-movement="{{ m.id }}">
 <div class="title-block"><strong>{{ m.on or 'Undated' }} · {{ m.direction }}</strong>
-{% if m.drive %}<a href="/drive/{{ m.drive }}">{{ m.label or m.drive }}</a>{% else %}<span>{{ m.label or 'Unknown label' }}</span><span class="chip chip--review">Unmatched</span>{% endif %}</div>
+{% if m.drive %}<a href="/drive/{{ m.drive }}">{{ m.label or "Drive without a label" }}</a>{% else %}<span>{{ m.label or 'Unknown label' }}</span><span class="chip chip--review">Unmatched</span>{% endif %}</div>
 <p>{{ display(m.project) }} · Person: {{ m.person or 'Unknown' }} · Place: {{ m.place or 'Unknown' }}</p>
 {% if m.description %}<p>{{ m.description }}</p>{% endif %}
 {% if m.remarks %}<p>{{ m.remarks }}</p>{% endif %}

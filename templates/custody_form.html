@@ -2,15 +2,15 @@
 {% set retiring = request.path.endswith("/retire") %}
 {% block title %}{{ "Retire Drive" if retiring else "Record custody" }}{% endblock %}
 {% block content %}
-<div class="page-head"><div><h1>{{ "Retire Drive" if retiring else "Record custody" }}</h1><p class="sub">Drive <span class="mono">{{ drive_id }}</span></p></div></div>
-{% if not retiring %}<p class="lead">Events are recorded as the Person the t6 API authenticates. A release belongs to a shipment.</p>{% endif %}
+<div class="page-head"><div><h1>{{ "Retire Drive" if retiring else "Record custody" }}</h1><p class="sub">Drive: {{ label or 'No label' }}{% if serial %} · {{ serial }}{% endif %}</p></div></div>
+{% if not retiring %}<p class="lead">Movements are recorded as the Person the t6 API authenticates. A release belongs to a shipment.</p>{% endif %}
 <div class="form-card">
 <form method="post">
 {% include "_hidden.html" %}
-<fieldset><legend>Event</legend><div class="fields">
+<fieldset><legend>Movement</legend><div class="fields">
 <div class="field"><label for="f-kind">Kind</label><select id="f-kind" name="kind" aria-label="Kind">{% for kind in kinds %}<option>{{ kind }}</option>{% endfor %}</select></div>
 <div class="field"><label for="f-on">Business date (blank = today)</label><input id="f-on" name="on" type="date"></div>
-<div class="field field--wide"><label for="f-project">Project</label><select id="f-project" name="project">{% for p in projects %}<option value="{{ p.t6_id }}">{{ p.name }} — {{ p.project_code or 'unknown code' }} — {{ p.t6_id }}</option>{% endfor %}</select></div>
+<div class="field field--wide"><label for="f-project">Project</label><select id="f-project" name="project">{% for p in projects %}<option value="{{ p.t6_id }}">{{ p.name }}</option>{% endfor %}</select></div>
 </div></fieldset>
 {% if not retiring %}<fieldset><legend>Party</legend><div class="fields">
 <div class="field"><label for="f-party-kind">Existing party kind</label><select id="f-party-kind" name="party_kind"><option value="">No party</option><option>contact</option><option>studio</option></select></div>
@@ -19,7 +19,7 @@
 {% endif %}<fieldset><legend>Reason</legend><div class="fields">
 <div class="field field--wide"><label for="f-reason">Reason (required for retirement)</label><input id="f-reason" name="reason"></div>
 </div></fieldset>
-<div class="form-actions"><button class="btn btn--primary">Append custody event</button><a class="btn btn--quiet" href="/drive/{{ drive_id }}">Cancel</a></div>
+<div class="form-actions"><button class="btn btn--primary">Record movement</button><a class="btn btn--quiet" href="/drive/{{ drive_id }}">Cancel</a></div>
 </form>
 </div>
 {% endblock %}

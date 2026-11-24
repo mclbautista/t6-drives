@@ -1,7 +1,7 @@
 <div class="capture" data-capture="{{ c.capture }}">
 {% if c.photo %}<a href="/captures/{{ c.capture }}/photo"><img class="capture-photo" src="/captures/{{ c.capture }}/photo" alt="Photo of the capture posted {{ c.posted_at }}" loading="lazy"></a>{% else %}<p class="muted">No photo is kept.</p>{% endif %}
 <div class="capture-text">
-<p class="title-block"><strong>Posted {{ c.posted_at }}</strong><span class="muted">Sender: {{ c.sender or 'Telegram ' ~ c.sender_telegram_id }}</span></p>
+<p class="title-block"><strong>Posted {{ c.posted_at }}</strong><span class="muted">Sender: {% if c.sender and not words.looks_like_id(c.sender) %}{{ c.sender }}{% else %}Telegram {{ c.sender_telegram_id }}{% endif %}</span></p>
 <p class="capture-line">{{ c.text if c.text is not none else 'No text is kept.' }}</p>
 {% for difference in c.differences %}<p class="muted small">{{ difference }}</p>{% endfor %}
 </div>

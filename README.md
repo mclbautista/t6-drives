@@ -36,8 +36,8 @@ Check: open it from another office machine, which works; a request whose `Host` 
 | `/new` serial first | `drive list` (exact accepted serial), then `drive add` |
 | `/drive/<id>` | `drive get` |
 | `/drive/<id>/edit` | `drive edit` (every fact; the form sends the Drive's `version` as `expected_version`, and a Drive that changed meanwhile is shown again) |
-| `/drive/<id>/promote` | `drive promote-serial` |
-| Assignments on the Drive page | `drive assign` (with remarks), `drive unassign` (by Assignment number, so one whose Project is text only can be ended) |
+| `/drive/<id>/promote` | `drive promote-serial` (the "Confirm serial" button) |
+| Project use on the Drive page | `drive assign` (with remarks), `drive unassign` (by Assignment number, so one whose Project is text only can be ended) |
 | `/drive/<id>/qr`, `/qr/<code or id>` | `drive get`, `drive find` (a printable QR label of the Drive's code; scanning it opens the Drive) |
 | `/drive/<id>/catalog` | `drive catalog-snapshots`, `drive catalog-diff`, `drive catalog-at` (scans, what each changed, the contents on a date with `?on=YYYY-MM-DD`), and `drive catalog-snapshot` (upload a JSON manifest) |
 | `/drive/<id>/retire` | `drive retire` |
@@ -48,7 +48,7 @@ Check: open it from another office machine, which works; a request whose `Host` 
 | `/drive/<id>/place` | `drive edit` (place TABLE, CABINET, SHELF, BOX or none, and T6 ownership; the search line shows both) |
 | `/exceptions` | `drive capture list` (unresolved captures with text and photo), `drive capture photo`, `drive capture` with a Drive, `movement list` (needs a Project) and `movement correct` (set it), `drive overdue`, `drive reload report` (unmapped Project names), `drive exceptions` (rows the reload could not load) |
 | `/captures/<id>/photo`, `/captures/<id>/drive` | `drive capture photo`, `drive list` and `drive capture` (pick a Drive for an unresolved capture) |
-| `/outbox` | writes waiting for the API, or refused by it |
+| `/outbox` | "Waiting to send": writes waiting for the API, or refused by it |
 | `/health` | none (process readiness) |
 
 Who acts is the Person the API secret is bound to; the app sends no actor. Projects for the Assignment, custody and shipment forms and the inventory filter come from the API's project reads (kept 5 minutes in memory); only registered Projects can be chosen. A form carries an idempotency key made when it is rendered, so a double submit is one write.
@@ -59,10 +59,10 @@ Who acts is the Person the API secret is bound to; the app sends no actor. Proje
 uv pip install --python .venv/bin/python -r requirements-dev.lock
 .venv/bin/python -m playwright install chromium
 .venv/bin/python -m unittest discover -s tests -v
-.venv/bin/python -m compileall -q app.py gateway.py forms.py outbox.py custody.py catalog.py shipments.py runtime.py tools tests
+.venv/bin/python -m compileall -q app.py gateway.py forms.py outbox.py custody.py catalog.py shipments.py runtime.py glossary.py tools tests
 .venv/bin/mypy
-.venv/bin/ruff check app.py gateway.py forms.py outbox.py custody.py catalog.py shipments.py runtime.py tools tests
-.venv/bin/ruff format --check app.py gateway.py forms.py outbox.py custody.py catalog.py shipments.py runtime.py tools tests
+.venv/bin/ruff check app.py gateway.py forms.py outbox.py custody.py catalog.py shipments.py runtime.py glossary.py tools tests
+.venv/bin/ruff format --check app.py gateway.py forms.py outbox.py custody.py catalog.py shipments.py runtime.py glossary.py tools tests
 .venv/bin/python -m build
 ```
 
@@ -74,7 +74,7 @@ A scan manifest of about 8,000 files is 1 to 2 MB, so only `POST /drive/<id>/cat
 
 A refusal for a step that cannot follow the last custody step (rule `custody`), or for an edit of a Drive that changed (`drive_changed`), is answered 409 and shown to the person; it is never queued or sent again.
 
-The main navigation is Search, Projects, Movements, Exceptions and Outbox. Recording happens in
+The main navigation is Search, Projects, Movements, Exceptions and Waiting to send. Recording happens in
 TRANSMITTAL; the legacy custody and release URLs remain available directly. Projects and Movements
 pages show API reads, with movement logs newest first. Retire remains linked from each Drive.
 Every rendered page uses the API's practice flag for its practice banner; no flag is guessed when
@@ -83,3 +83,7 @@ the API is unavailable.
 A capture photo is read from the API for each request and passed on to the browser with `Cache-Control: no-store`; the app never writes it to disk or logs it, and sends it nowhere else. Like every page, it is open to anyone who can reach the app on the office network.
 
 Search sends the typed text to `drive list`, which matches label, serial and Project code; each result line shows the status, `place` and `holder` the API returns, and nothing is derived in the app.
+
+## Plain words
+
+Pages show a Drive by its label, with its serial and Project underneath. An ID (anything like `t6d_` and hex) appears only in a link, a form value or a data attribute, and in the collapsed "Details" line of a Drive page; never in text or a drop-down. The plain words are in `glossary.py` (Project use, movement, serial, serial to check, Confirm serial, Waiting to send; Retire, Drive and Movement stay). `tests/test_plain_pages.py` renders every page with fixture data and fails on an ID or a system word (Assignment, custody event, accepted or suspected serial, Promote, Outbox, "[person") in the visible text. A message from the API goes through the `plain` filter before it is shown. A new page must be added to the route list in that test.

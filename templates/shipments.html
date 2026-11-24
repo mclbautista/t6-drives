@@ -3,8 +3,8 @@
 {% block content %}
 <div class="page-head"><h1>Shipments</h1></div>
 {% if shipments %}<div class="table-card">
-<div class="grid-head ship" aria-hidden="true"><span>ID</span><span>Recipient</span><span>Date</span><span>Project</span><span>Drives</span></div>
-<ul class="rows ship">{% for s in shipments %}<li><a class="c-id mono" href="/shipments/{{ s.shipment_id }}">{{ s.shipment_id }}</a><span class="c-who">{% if s.party %}{{ s.party.ref.text or s.party.ref.page_id }}{% else %}Unknown recipient{% endif %}</span><span class="c-date">{{ s.on or 'Unknown date' }}</span><span class="c-project">{{ display(s.project) }}</span><span class="c-count muted">{{ s.drive_count }} Drive{{ '' if s.drive_count == 1 else 's' }}</span></li>{% endfor %}</ul>
+<div class="grid-head ship" aria-hidden="true"><span>Shipment</span><span>Recipient</span><span>Date</span><span>Project</span><span>Drives</span></div>
+<ul class="rows ship">{% for s in shipments %}<li><a class="c-id" href="/shipments/{{ s.shipment_id }}">Shipment of {{ s.on or 'unknown date' }}</a><span class="c-who">{% if s.party %}{{ s.party.ref.text or s.party.kind }}{% else %}Unknown recipient{% endif %}</span><span class="c-date">{{ s.on or 'Unknown date' }}</span><span class="c-project">{{ display(s.project) }}</span><span class="c-count muted">{{ s.drive_count }} Drive{{ '' if s.drive_count == 1 else 's' }}</span></li>{% endfor %}</ul>
 </div>
 {% else %}<ul></ul>
 <div class="card empty"><p class="empty-title">No shipments yet.</p><p class="muted">A release of one or more Drives is recorded as a shipment, with a printable manifest.</p><a class="btn btn--primary" href="/shipments/new">Release shipment</a></div>

@@ -165,13 +165,14 @@ form.inline input { width: 11rem; }
 /* Table-like lists */
 .table-card { margin-bottom: var(--s5); }
 .grid-head, .drives > li, .ship > li { display: grid; gap: var(--s1) var(--s4); padding: var(--s3) var(--s4); align-items: start; }
-.grid-head, .drives > li { grid-template-columns: minmax(8.5rem, 10.5rem) minmax(0, 2fr) minmax(0, 1.4fr) 9.5rem minmax(0, 2fr); }
+.grid-head, .drives > li { grid-template-columns: minmax(0, 3fr) 9.5rem minmax(0, 2fr); }
 .grid-head.ship, .ship > li { grid-template-columns: minmax(10rem, 14rem) minmax(0, 1.5fr) 7.5rem minmax(0, 1.5fr) 6rem; }
 .grid-head { background: var(--surface-2); border-bottom: 1px solid var(--border); border-radius: var(--radius) var(--radius) 0 0; color: var(--muted); font-size: 0.75rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; padding-top: var(--s2); padding-bottom: var(--s2); }
 .table-card li { position: relative; border-top: 1px solid var(--border); }
 .table-card li:first-child { border-top: 0; }
 .table-card li:hover { background: var(--surface-2); }
-.c-id { font-weight: 500; }
+.c-id { font-weight: 600; }
+.c-line { display: flex; flex-wrap: wrap; gap: var(--s1) var(--s3); }
 .c-name { display: grid; gap: 2px; min-width: 0; }
 .c-serial, .c-status, .c-use { display: flex; flex-direction: column; align-items: flex-start; gap: var(--s1); min-width: 0; }
 .c-count { text-align: right; }
@@ -182,6 +183,9 @@ form.inline input { width: 11rem; }
 .c-id:hover { text-decoration: underline; }
 .serial { font-family: var(--mono); font-size: 0.8125rem; }
 .serial--suspected { font-style: italic; border: 1px dashed var(--border-strong); border-radius: var(--radius); padding: 1px var(--s2); color: var(--muted); font-family: var(--sans); }
+.drive-sub { margin: var(--s1) 0 0; color: var(--muted); }
+.ids { margin-top: var(--s2); font-size: 0.8125rem; color: var(--muted); }
+.ids summary { cursor: pointer; }
 .suspected { font-style: italic; color: var(--muted); }
 .table-scroll { overflow-x: auto; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); margin-bottom: var(--s4); }
 table.data { border-collapse: collapse; width: 100%; font-size: 0.875rem; }
@@ -234,13 +238,12 @@ table.data { border-collapse: collapse; width: 100%; font-size: 0.875rem; }
 }
 @media (max-width: 720px) {
   .grid-head { display: none; }
-  .drives > li { grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "id status" "name name" "serial serial" "use use"; gap: var(--s2) var(--s3); }
+  .drives > li { grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "name status" "use use"; gap: var(--s2) var(--s3); }
   .ship > li { grid-template-columns: minmax(0, 1fr) auto; gap: var(--s1) var(--s3); }
   .ship .c-id { grid-column: 1 / -1; }
   .ship .c-who { grid-column: 1; font-weight: 600; }
   .ship .c-date, .ship .c-project { grid-column: 1 / -1; color: var(--muted); }
   .ship .c-count { grid-column: 2; grid-row: 2; align-self: start; }
-  .c-id { grid-area: id; }
   .c-name { grid-area: name; }
   .c-serial { grid-area: serial; }
   .c-status { grid-area: status; flex-direction: row; flex-wrap: wrap; justify-content: flex-end; }

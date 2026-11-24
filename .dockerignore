@@ -11,6 +11,7 @@
 !shipments.py
 !reload.py
 !runtime.py
+!glossary.py
 !templates/
 !templates/*.html
 !templates/*.css

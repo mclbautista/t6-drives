@@ -7,6 +7,7 @@ import math
 import re
 import secrets
 from collections.abc import Mapping
+from datetime import UTC, datetime
 from typing import Any
 from urllib.parse import urlencode
 
@@ -70,7 +71,12 @@ LABELS = {
     "office_location": "Office location",
     "qr_code": "QR code",
 }
-PROJECT_SORTS = {"az": "A to Z", "out": "Most drives out", "total": "Most drives in total"}
+PROJECT_SORTS = {
+    "latest": "Latest movement",
+    "az": "A to Z",
+    "out": "Most drives out",
+    "total": "Most drives in total",
+}
 PROJECT_KINDS = {"registered": "Registered", "name_only": "Name only, not linked to a Project yet"}
 PLACES = ("TABLE", "CABINET", "SHELF", "BOX")
 KEEP = "keep"  # a select choice that sends nothing for that fact
@@ -250,7 +256,7 @@ def create_app(
         kind = request.args.get("kind", "")
         kind = kind if kind in PROJECT_KINDS else ""
         sort = request.args.get("sort", "")
-        sort = sort if sort in PROJECT_SORTS else "az"
+        sort = sort if sort in PROJECT_SORTS else "latest"
         listed = gateway.read("drive_projects", DriveProjectsInput())["projects"]
         codes = {p["t6_id"]: p.get("project_code") or "" for p in gateway.projects()}
         rows = []
@@ -269,7 +275,18 @@ def create_app(
             rows.append(
                 {**item, "key": ref["page_id"] or ref["text"], "name": name, "plain": plain}
             )
+
+        def newest_first(row: Mapping[str, Any]) -> tuple[float, str]:
+            """Newest movement first; a Project with none, or none that can be read, goes last."""
+            try:
+                when = datetime.fromisoformat(row.get("latest_movement") or "")
+            except ValueError:
+                return (math.inf, row["plain"].casefold())
+            stamp = (when if when.tzinfo else when.replace(tzinfo=UTC)).timestamp()
+            return (-stamp, row["plain"].casefold())
+
         ordering = {
+            "latest": newest_first,
             "az": lambda r: (r["plain"].casefold(),),
             "out": lambda r: (-r["released"], r["plain"].casefold()),
             "total": lambda r: (-r["total"], r["plain"].casefold()),

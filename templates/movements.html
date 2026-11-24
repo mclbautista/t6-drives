@@ -1,0 +1,13 @@
+{% extends "base.html" %}
+{% block title %}Movements{% endblock %}
+{% block content %}
+<h1>Movements</h1>
+<form class="card fields">
+{% for name, label, type in [('project', 'Project', 'text'), ('person', 'Person', 'text'), ('q', 'Text', 'search'), ('start', 'From date', 'date'), ('end', 'To date', 'date')] %}
+<div class="field"><label for="f-{{ name }}">{{ label }}</label><input id="f-{{ name }}" name="{{ name }}" type="{{ type }}" value="{{ request.args.get(name, '') }}"></div>
+{% endfor %}
+<div class="form-actions"><button class="btn btn--primary">Filter</button><a class="btn" href="/movements">Clear filters</a></div>
+</form>
+<h2>Movement log</h2>
+{% include "_movements.html" %}
+{% endblock %}

@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+{% block title %}Projects{% endblock %}
+{% block content %}
+<h1>Projects</h1>
+<ul class="stack">
+{% for p in projects %}
+{% set key = p.project.page_id or p.project.text %}
+<li data-project="{{ key }}"><article class="card">
+<h2><a href="/projects/view?project={{ key|urlencode }}">{{ display(p.project) }}</a></h2>
+<p>Total <span data-count="total">{{ p.total }}</span> · In-house <span data-count="in_house">{{ p.in_house }}</span> · Released <span data-count="released">{{ p.released }}</span></p>
+</article></li>
+{% else %}<li class="empty-note">No Projects with Drives.</li>{% endfor %}
+</ul>
+{% endblock %}

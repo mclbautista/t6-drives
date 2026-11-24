@@ -63,6 +63,35 @@ class BrowserTest(DriveAppCase):
     def tearDown(self):
         self.assertEqual(self.errors, [])
 
+    def test_projects_and_movements_at_phone_and_desktop_width(self):
+        from test_projects import load_projects
+
+        load_projects(self)
+        for width in (375, 1280):
+            self.page.set_viewport_size({"width": width, "height": 900})
+            self.page.goto(self.base + "/")
+            self.page.get_by_role("link", name="Projects", exact=True).click()
+            expect(self.page.get_by_role("heading", name="Projects", exact=True)).to_be_visible()
+            for project in ("Unresolved: Synthetic violet", "Unresolved: Synthetic text project"):
+                self.page.get_by_role("link", name=project, exact=True).click()
+                expect(
+                    self.page.get_by_text(
+                        "SYN-TEXT" if project.endswith("project") else "SYN-MASTER", exact=True
+                    )
+                ).to_be_visible()
+                self.assertLessEqual(
+                    self.page.evaluate("document.documentElement.scrollWidth"), width
+                )
+                self.page.get_by_role("link", name="All Projects", exact=True).click()
+            self.assertLessEqual(self.page.evaluate("document.documentElement.scrollWidth"), width)
+            self.page.get_by_role("link", name="Movements", exact=True).click()
+            self.page.get_by_label("Person", exact=True).fill("Receiver")
+            self.page.get_by_role("button", name="Filter", exact=True).click()
+            expect(self.page.get_by_text("Synthetic missing", exact=True)).to_be_visible()
+            expect(self.page.get_by_text("Unmatched", exact=True)).to_be_visible()
+            expect(self.page.get_by_text("Synthetic master", exact=True)).to_have_count(0)
+            self.assertLessEqual(self.page.evaluate("document.documentElement.scrollWidth"), width)
+
     def test_search_and_new_drive_at_phone_and_desktop_width(self):
         drive = self.api.add_drive(
             label="Synthetic phone master " + "x" * 100,

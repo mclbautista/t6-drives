@@ -1,0 +1,11 @@
+<ul class="stack movement-log">
+{% for m in movements %}
+<li class="card" data-movement="{{ m.id }}">
+<div class="title-block"><strong>{{ m.on or 'Undated' }} · {{ m.direction }}</strong>
+{% if m.drive %}<a href="/drive/{{ m.drive }}">{{ m.label or m.drive }}</a>{% else %}<span>{{ m.label or 'Unknown label' }}</span><span class="chip chip--review">Unmatched</span>{% endif %}</div>
+<p>{{ display(m.project) }} · Person: {{ m.person or 'Unknown' }} · Place: {{ m.place or 'Unknown' }}</p>
+{% if m.description %}<p>{{ m.description }}</p>{% endif %}
+{% if m.remarks %}<p>{{ m.remarks }}</p>{% endif %}
+</li>
+{% else %}<li class="empty-note">No movements match.</li>{% endfor %}
+</ul>

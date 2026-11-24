@@ -1,0 +1,19 @@
+{% extends "base.html" %}
+{% from "_macros.html" import status_badge %}
+{% block title %}{{ display(project) }}{% endblock %}
+{% block content %}
+<div class="page-head"><h1>{{ display(project) }}</h1><a class="btn" href="/projects">All Projects</a></div>
+<h2>Drives</h2>
+<ul class="stack">
+{% for d in drives %}
+<li class="card">
+<h3><a href="/drive/{{ d.id }}">{{ d.label or d.id }}</a></h3>
+<p class="serial">{{ d.serial or 'No serial' }}</p>
+<div class="badges">{{ status_badge(d.status) }}</div>
+<p>Place: {{ d.place or 'Unknown' }} · Holder: {{ d.holder or 'Unknown' }}</p>
+</li>
+{% else %}<li class="empty-note">No Drives.</li>{% endfor %}
+</ul>
+<h2>Movement log</h2>
+{% include "_movements.html" %}
+{% endblock %}

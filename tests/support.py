@@ -5,11 +5,13 @@ uses. Drives, custody events and Assignments are seeded only by calling verbs th
 Projects are registered in the t6 registry with a Notion page from t6's own Notion fake.
 """
 
+import base64
 import os
 import re
 import tempfile
 import threading
 import unittest
+from datetime import datetime
 from http.server import ThreadingHTTPServer
 from typing import Any
 from unittest.mock import patch
@@ -32,6 +34,11 @@ from t6.verbs import Done, Preview
 from app import create_app
 
 SECRET = "synthetic-custodian-secret"
+RECORDING_CHAT = -1001
+# A real 1x1 PNG, so a browser can draw it.
+PHOTO = base64.b64decode(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGP4z8DwHwAFAAH/q842iQAAAABJRU5ErkJggg=="
+)
 
 
 class SyntheticAPI:
@@ -182,6 +189,46 @@ class SyntheticAPI:
 
         SqliteDriveStore(self.registry).record_exceptions([ReviewItem(**fields)])
 
+    def capture(self, text: str, message: int = 1, day: str = "2026-11-02") -> str:
+        """A recording post as the Telegram gateway admits it, then resolved by t6's own resolver.
+
+        No photo reader is configured, so the resolver goes by the text alone; a post it cannot
+        match to a Drive becomes an exception.
+        """
+        from t6.drives.capture import capture_post
+        from t6.verbs import DriveCaptureInput
+
+        posted = capture_post(
+            self.registry,
+            DriveCaptureInput(
+                chat_id=RECORDING_CHAT,
+                message_id=message,
+                sender_telegram_id=7,
+                posted_at=datetime.fromisoformat(day + "T10:00:00+08:00"),
+                text=text,
+                photo=base64.b64encode(PHOTO).decode(),
+            ),
+        )
+        assert isinstance(posted, Done), posted
+        capture = str(posted.result["capture"])
+        self.resolve_capture(capture)
+        return capture
+
+    def resolve_capture(self, capture: str, revision: int = 0) -> None:
+        """What t6's worker does with a queued capture; the photo reader answers that it sees no Drive."""
+        from t6.drives.capture import CaptureResolver
+        from t6.llm.testing import FakeProvider
+        from t6.worker.client import WorkerJob
+
+        provider = FakeProvider()
+        provider.reply('{"drives": []}')
+        payload: dict[str, Any] = {"capture": capture}
+        if revision:
+            payload["revision"] = revision
+        CaptureResolver(self.registry, provider).handle(
+            WorkerJob(1, "main", "drive.capture.resolve", capture, payload, "token", 1)
+        )
+
     def assign(self, drive: str, project: str, label: str, role: str, **values: Any) -> None:
         from t6.verbs import DriveAssignInput
 
@@ -244,7 +291,11 @@ class DriveAppCase(unittest.TestCase):
     def setUp(self) -> None:
         env = patch.dict(
             os.environ,
-            {"T6_NOTION_TOKEN": "synthetic", "T6_PREVIEW_SIGNING_KEY": "synthetic-signing-key"},
+            {
+                "T6_NOTION_TOKEN": "synthetic",
+                "T6_PREVIEW_SIGNING_KEY": "synthetic-signing-key",
+                "T6_DRIVE_RECORDING_CHAT_ID": str(RECORDING_CHAT),
+            },
         )
         env.start()
         self.addCleanup(env.stop)

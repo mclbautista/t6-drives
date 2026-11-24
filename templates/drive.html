@@ -7,7 +7,7 @@
 <h1>Drive {{ d.id }}</h1>
 <div class="badges">{{ status_badge(d.status) }}{% if d.needs_review %}{{ review_chip() }}{% endif %}</div>
 </div>
-<div class="actions"><a class="btn" href="/drive/{{ d.id }}/catalog">Contents</a><a class="btn" href="/drive/{{ d.id }}/qr">QR label</a><a class="btn" href="/drive/{{ d.id }}/edit">Edit</a><a class="btn btn--primary" href="/drive/{{ d.id }}/retire">Retire</a></div>
+<div class="actions"><a class="btn" href="/movements?drive={{ d.id|urlencode }}">Movements</a><a class="btn" href="/drive/{{ d.id }}/catalog">Contents</a><a class="btn" href="/drive/{{ d.id }}/qr">QR label</a><a class="btn" href="/drive/{{ d.id }}/edit">Edit</a><a class="btn btn--primary" href="/drive/{{ d.id }}/retire">Retire</a></div>
 </div>
 <div class="cols">
 <div class="stack">
@@ -15,6 +15,17 @@
 <h2>Facts</h2>
 <dl class="facts">{% for name in fields %}{% if d.get(name) is not none %}<div><dt>{{ labels.get(name, name|capitalize) }}</dt><dd{% if name == 'serial' %} class="mono"{% elif name == 'suspected_serial' %} class="mono suspected"{% endif %}>{{ d[name] }}</dd></div>{% endif %}{% endfor %}<div><dt>Ownership</dt><dd>{{ ownership }}</dd></div><div><dt>Needs review</dt><dd>{{ 'Yes' if d.needs_review else 'No' }}</dd></div></dl>
 {% if d.suspected_serial %}<div class="card-foot"><p class="muted small">The suspected serial is uncertain until you confirm it.</p><form method="post" action="/drive/{{ d.id }}/promote">{% include "_hidden.html" %}<button class="btn">Promote suspected serial to accepted</button></form></div>{% endif %}
+</section>
+<section class="card">
+<h2>Place and ownership</h2>
+<form method="post" action="/drive/{{ d.id }}/place">
+{% include "_hidden.html" %}<input type="hidden" name="expected_version" value="{{ d.version }}">
+<div class="fields">
+<div class="field"><label for="p-place">Place</label><select id="p-place" name="place"><option value=""{% if not d.office_location %} selected{% endif %}>No place</option>{% for place in places %}<option value="{{ place }}"{% if d.office_location == place %} selected{% endif %}>{{ place }}</option>{% endfor %}{% if d.office_location and d.office_location not in places %}<option value="keep" selected>Keep: {{ d.office_location }}</option>{% endif %}</select></div>
+{% if d.ownership in ('t6', 'unknown') %}<div class="field"><label for="p-ownership">Ownership</label><select id="p-ownership" name="ownership"><option value="t6"{% if d.ownership == 't6' %} selected{% endif %}>T6 owns this Drive</option><option value="unknown"{% if d.ownership == 'unknown' %} selected{% endif %}>Ownership not recorded</option></select></div>{% endif %}
+</div>
+<div class="form-actions"><button class="btn btn--primary">Save place and ownership</button></div>
+</form>
 </section>
 </div>
 <div class="stack">{{ history|safe }}</div>

@@ -8,6 +8,7 @@ import unittest
 
 from playwright.sync_api import expect, sync_playwright
 from support import DriveAppCase
+from t6.verbs import MovementListInput
 from werkzeug.serving import WSGIRequestHandler, make_server
 
 FIRST_SCAN = [
@@ -252,6 +253,54 @@ class BrowserTest(DriveAppCase):
         page.get_by_label("Status", exact=True).select_option("released")
         page.get_by_role("button", name="Find", exact=True).click()
         expect(page.get_by_role("link", name=first, exact=True)).to_be_visible()
+
+    def test_exceptions_corrections_and_place_at_phone_and_desktop_width(self):
+        project = self.api.project("Synthetic exceptions project")
+        drive = self.api.add_drive(
+            label="Synthetic exception master " + "x" * 100, serial="SYN-EXC-" + "9" * 80
+        )
+        self.api.add_drive(label="Synthetic spare", serial="SYN-SPARE")
+        self.api.capture("OUT Invented Courier|SYN-EXC-" + "9" * 80, message=1)
+        capture = self.api.capture("OUT Invented Courier|" + "NOWHERE-" * 20, message=2)
+        movement = self.api.read("movement_list", MovementListInput)["movements"][0]["id"]
+        for width in (375, 1280):
+            page = self.page
+            page.set_viewport_size({"width": width, "height": 900})
+            for path in (
+                "/exceptions",
+                f"/captures/{capture}/drive",
+                f"/movements/{movement}/correct",
+                f"/movements?drive={drive}",
+                f"/drive/{drive}",
+            ):
+                page.goto(self.base + path)
+                self.assertLessEqual(
+                    page.evaluate("document.documentElement.scrollWidth"), width, path
+                )
+            page.goto(self.base + "/exceptions")
+            photo = page.locator("img.capture-photo")
+            expect(photo).to_be_visible()
+            page.wait_for_function(
+                "document.querySelector('img.capture-photo').naturalWidth > 0", timeout=5000
+            )
+        page = self.page
+        page.set_viewport_size({"width": 375, "height": 900})
+        page.goto(self.base + "/exceptions")
+        page.get_by_label("Project", exact=True).select_option(project)
+        page.get_by_role("button", name="Set Project", exact=True).click()
+        expect(page.get_by_text("No movements need a Project.")).to_be_visible()
+        page.get_by_role("link", name="Give it a Drive").click()
+        page.get_by_label("Find a Drive").fill("SYN-SPARE")
+        page.get_by_role("button", name="Find", exact=True).click()
+        page.get_by_role("button", name="Give this Drive").click()
+        expect(page.get_by_role("status")).to_contain_text("given to Drive")
+        expect(page.get_by_text("No unresolved captures.")).to_be_visible()
+        page.goto(self.base + f"/drive/{drive}")
+        page.get_by_label("Place", exact=True).select_option("SHELF")
+        page.get_by_role("button", name="Save place and ownership").click()
+        page.goto(self.base + "/?q=SYN-EXC")
+        expect(page.get_by_text("SHELF", exact=True)).to_be_visible()
+        expect(page.get_by_text("T6 owned", exact=True)).to_be_visible()
 
     def test_a_write_made_while_the_api_is_down_is_queued_and_lands_once_after_recovery(self):
         page = self.page

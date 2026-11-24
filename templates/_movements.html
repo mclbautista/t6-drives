@@ -1,11 +1,14 @@
+{% set corrected_by = {} %}{% for m in movements if m.corrects %}{% set _ = corrected_by.update({m.corrects: m.id}) %}{% endfor %}
 <ul class="stack movement-log">
 {% for m in movements %}
-<li class="card" data-movement="{{ m.id }}">
+<li class="card" id="m-{{ m.id }}" data-movement="{{ m.id }}">
 <div class="title-block"><strong>{{ m.on or 'Undated' }} · {{ m.direction }}</strong>
 {% if m.drive %}<a href="/drive/{{ m.drive }}">{{ m.label or m.drive }}</a>{% else %}<span>{{ m.label or 'Unknown label' }}</span><span class="chip chip--review">Unmatched</span>{% endif %}</div>
 <p>{{ display(m.project) }} · Person: {{ m.person or 'Unknown' }} · Place: {{ m.place or 'Unknown' }}</p>
 {% if m.description %}<p>{{ m.description }}</p>{% endif %}
 {% if m.remarks %}<p>{{ m.remarks }}</p>{% endif %}
+{% if m.corrects %}<p class="muted small"><a href="#m-{{ m.corrects }}">Correction of the earlier entry</a></p>{% endif %}
+{% if m.id in corrected_by %}<p class="muted small"><span class="chip">Corrected</span> <a href="#m-{{ corrected_by[m.id] }}">See the correction</a></p>{% else %}<p class="small"><a href="/movements/{{ m.id }}/correct">Correct this entry</a></p>{% endif %}
 </li>
 {% else %}<li class="empty-note">No movements match.</li>{% endfor %}
 </ul>

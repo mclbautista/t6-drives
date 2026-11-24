@@ -27,11 +27,11 @@ line-length = 100
 [tool.mypy]
 python_version = "3.12"
 check_untyped_defs = true
-files = ["app.py", "gateway.py", "forms.py", "outbox.py", "custody.py", "catalog.py", "shipments.py", "runtime.py", "glossary.py", "movement_photos.py", "tools", "tests"]
+files = ["app.py", "gateway.py", "forms.py", "outbox.py", "custody.py", "catalog.py", "shipments.py", "reload.py", "runtime.py", "glossary.py", "movement_photos.py", "tools", "tests"]
 
 [build-system]
 requires = ["setuptools==80.9.0"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
-py-modules = ["app", "gateway", "forms", "outbox", "custody", "catalog", "shipments", "runtime", "glossary", "movement_photos"]
+py-modules = ["app", "gateway", "forms", "outbox", "custody", "catalog", "shipments", "reload", "runtime", "glossary", "movement_photos"]

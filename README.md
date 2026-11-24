@@ -50,6 +50,7 @@ Check: open it from another office machine, which works; a request whose `Host` 
 | `/captures/<id>/photo`, `/captures/<id>/drive` | `drive capture photo`, `drive list` and `drive capture` (pick a Drive for an unresolved capture) |
 | `/movements/<id>`, `/movements/<id>/photo`, `/movements/<id>/photo/delete` | `movement list`, `movement photo-get`, `movement photo-add` (add or replace), `movement photo-delete` (the API lets only the drive custodian or an operator delete) |
 | Movement photos | a movement recorded from TRANSMITTAL shows its capture photo as a thumbnail that opens it (`drive capture photo`) |
+| `/exceptions/reload` | `drive reload` (a summary of what is loaded now, then a confirm; refused in plain words once the system is live) |
 | `/outbox` | "Waiting to send": writes waiting for the API, or refused by it |
 | `/health` | none (process readiness) |
 
@@ -61,10 +62,10 @@ Who acts is the Person the API secret is bound to; the app sends no actor. Proje
 uv pip install --python .venv/bin/python -r requirements-dev.lock
 .venv/bin/python -m playwright install chromium
 .venv/bin/python -m unittest discover -s tests -v
-.venv/bin/python -m compileall -q app.py gateway.py forms.py outbox.py custody.py catalog.py shipments.py runtime.py glossary.py tools tests
+.venv/bin/python -m compileall -q app.py gateway.py forms.py outbox.py custody.py catalog.py shipments.py reload.py runtime.py glossary.py tools tests
 .venv/bin/mypy
-.venv/bin/ruff check app.py gateway.py forms.py outbox.py custody.py catalog.py shipments.py runtime.py glossary.py tools tests
-.venv/bin/ruff format --check app.py gateway.py forms.py outbox.py custody.py catalog.py shipments.py runtime.py glossary.py tools tests
+.venv/bin/ruff check app.py gateway.py forms.py outbox.py custody.py catalog.py shipments.py reload.py runtime.py glossary.py tools tests
+.venv/bin/ruff format --check app.py gateway.py forms.py outbox.py custody.py catalog.py shipments.py reload.py runtime.py glossary.py tools tests
 .venv/bin/python -m build
 ```
 

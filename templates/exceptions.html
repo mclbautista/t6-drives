@@ -40,6 +40,7 @@
 </section>
 
 <h2>Last reload</h2>
+<p class="small"><a class="btn" href="/exceptions/reload">Reload now</a></p>
 {% if report %}<p class="muted">Reloaded {{ report.at }}: {{ report.rows_read }} rows read, {{ report.drives }} Drives, {{ report.movements_unmatched }} movements not matched to a Drive.</p>
 <h3>Project names the sheet uses that T6 does not know</h3>
 {% if report.unmapped_projects %}<ul class="plain">{% for name in report.unmapped_projects %}<li>{{ name }}</li>{% endfor %}</ul>{% else %}<div class="card empty"><p class="empty-title">Every Project name is known.</p></div>{% endif %}

@@ -126,6 +126,7 @@ main:focus { outline: none; }
 [role="alert"] { background: var(--bad-bg); color: var(--bad-fg); border-color: var(--bad-bd); }
 [role="status"] { background: var(--info-bg); color: var(--info-fg); border-color: var(--info-bd); }
 .banner { max-width: 44rem; }
+.practice { background: var(--warn-bg); color: var(--warn-fg); border: 1px solid var(--warn-bd); border-radius: var(--radius); padding: var(--s3) var(--s4); }
 
 /* Forms */
 label { font-weight: 600; font-size: 0.8125rem; }

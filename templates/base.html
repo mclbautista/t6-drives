@@ -13,15 +13,16 @@
 <div class="wrap bar">
 <a class="brand" href="/">Drives</a>
 <nav aria-label="Main">
-<a href="/"{% if path == "/" or path == "/new" or path.startswith("/drive/") %} aria-current="page"{% endif %}>Inventory</a>
-<a href="/shipments"{% if path == "/shipments" or (path.startswith("/shipments/") and path != "/shipments/new") %} aria-current="page"{% endif %}>Shipments</a>
+<a href="/"{% if path == "/" or path == "/new" or path.startswith("/drive/") %} aria-current="page"{% endif %}>Search</a>
+<a href="/projects"{% if path.startswith("/projects") %} aria-current="page"{% endif %}>Projects</a>
+<a href="/movements"{% if path.startswith("/movements") %} aria-current="page"{% endif %}>Movements</a>
 <a href="/exceptions"{% if path == "/exceptions" %} aria-current="page"{% endif %}>Exceptions</a>
 <a href="/outbox"{% if path == "/outbox" %} aria-current="page"{% endif %}>Outbox</a>
 </nav>
-<a class="btn btn--primary" href="/shipments/new">Release shipment</a>
 </div>
 </header>
 <main id="main" class="wrap" tabindex="-1">
+{% if practice %}<p class="practice">Practice: records are wiped at the next reload</p>{% endif %}
 {% block content %}{% endblock %}
 </main>
 </body>

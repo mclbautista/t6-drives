@@ -13,20 +13,21 @@ VERBS = {"received": "drive_receive", "returned": "drive_return", "retired": "dr
 
 def register_custody(app: Flask, gateway: Gateway, csrf: Callable[[], str]) -> None:
     @app.route("/drive/<drive_id>/custody", methods=["GET", "POST"])
+    @app.route("/drive/<drive_id>/retire", methods=["GET", "POST"])
     def record_custody(drive_id: str):
         if request.method == "GET":
             gateway.read("drive_get", DriveGetInput(drive=drive_id))
             return render_template(
                 "custody_form.html",
                 drive_id=drive_id,
-                kinds=VERBS,
+                kinds={"retired": "drive_retire"} if request.path.endswith("/retire") else VERBS,
                 projects=gateway.projects(),
                 csrf=csrf(),
                 new_key=new_key,
             )
         form = request.form
         method = VERBS.get(form.get("kind", ""))
-        if method is None:
+        if method is None or (request.path.endswith("/retire") and method != "drive_retire"):
             abort(400)
         values = {"drive": drive_id, "project": form.get("project", "").strip()}
         if method == "drive_retire":

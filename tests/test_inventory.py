@@ -95,7 +95,7 @@ class InventoryTests(DriveAppCase):
 
     def test_inventory_links_to_every_other_screen(self):
         html = self.text("/")
-        for link in ("/new", "/shipments", "/shipments/new", "/exceptions", "/outbox"):
+        for link in ("/new", "/projects", "/movements", "/exceptions", "/outbox"):
             self.assertIn(f'href="{link}"', html)
 
     def test_names_from_the_api_are_escaped(self):

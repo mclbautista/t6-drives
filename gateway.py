@@ -5,6 +5,7 @@ import logging
 import threading
 import time
 from collections.abc import Mapping
+from contextvars import ContextVar
 from dataclasses import dataclass
 from typing import Any
 
@@ -99,6 +100,7 @@ def describe(outcome: Outcome) -> str:
 class Gateway:
     def __init__(self, client: Client, outbox: Outbox, retry_interval: float) -> None:
         self.client, self.outbox, self.retry_interval = client, outbox, retry_interval
+        self.practice: ContextVar[bool | None] = ContextVar("practice", default=None)
         self._slow = copy.copy(client)
         self._slow.timeout = max(client.timeout, SLOW_SECONDS)
         self._tried = time.monotonic()
@@ -116,6 +118,8 @@ class Gateway:
                 getattr(outcome, "rule", "unexpected"),
                 getattr(outcome, "reason", "Unexpected answer."),
             )
+        if "practice" in outcome.result:
+            self.practice.set(outcome.result["practice"])
         return dict(outcome.result)
 
     def _project_cache(self) -> tuple[list[dict[str, Any]], dict[str, dict[str, Any]]]:

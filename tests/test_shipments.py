@@ -172,7 +172,7 @@ class ShipmentTests(DriveAppCase):
 
 class ExceptionsTests(DriveAppCase):
     def test_the_import_exceptions_the_api_holds_are_listed_read_only_and_escaped(self):
-        self.assertIn("No import exceptions", self.text("/exceptions"))
+        self.assertIn("Nothing to do.", self.text("/exceptions"))
         self.api.import_exception(
             workbook="synthetic.xlsx",
             sheet="Log",
@@ -182,9 +182,7 @@ class ExceptionsTests(DriveAppCase):
         )
         html = self.text("/exceptions")
         for shown in (
-            "synthetic.xlsx",
-            "Log",
-            "7",
+            "Tab “Log”, row 7",
             "movement with no serial",
             "&lt;b&gt;raw&lt;/b&gt;",
         ):

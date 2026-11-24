@@ -8,7 +8,14 @@ from typing import Any
 
 from flask import Flask, abort, redirect, render_template, request, session
 from t6.client import Client
-from t6.verbs import DriveExceptionsInput, DriveGetInput, DriveListInput, Refused
+from t6.verbs import (
+    DriveExceptionsInput,
+    DriveGetInput,
+    DriveListInput,
+    DriveProjectsInput,
+    MovementListInput,
+    Refused,
+)
 from t6.vocabulary import DRIVE_ROLES
 from werkzeug.exceptions import HTTPException, NotFound
 
@@ -191,6 +198,48 @@ def create_app(
             status=status,
             project=project,
             projects=gateway.projects(),
+            display=gateway.project_display,
+        )
+
+    @app.get("/projects")
+    def projects_list():
+        listed = gateway.read("drive_projects", DriveProjectsInput())
+        return render_template(
+            "projects.html", projects=listed["projects"], display=gateway.project_display
+        )
+
+    @app.get("/projects/view")
+    def project_page():
+        project = request.args.get("project", "").strip()
+        if not project:
+            abort(400)
+        counts = gateway.read("drive_projects", DriveProjectsInput())["projects"]
+        found = next(
+            (p for p in counts if project in (p["project"]["page_id"], p["project"]["text"])),
+            None,
+        )
+        if found is None:
+            abort(404)
+        drives = gateway.read("drive_list", DriveListInput(project=project))["drives"]
+        movements = gateway.read("movement_list", MovementListInput(project=project))["movements"]
+        return render_template(
+            "project.html",
+            project=found["project"],
+            drives=drives,
+            movements=sorted(movements, key=lambda m: m["on"] or "", reverse=True),
+            display=gateway.project_display,
+        )
+
+    @app.get("/movements")
+    def movements_page():
+        filters: dict[str, Any] = {
+            name: request.args.get(name, "").strip() or None
+            for name in ("project", "person", "q", "start", "end")
+        }
+        listed = gateway.read("movement_list", MovementListInput(**filters))
+        return render_template(
+            "movements.html",
+            movements=sorted(listed["movements"], key=lambda m: m["on"] or "", reverse=True),
             display=gateway.project_display,
         )
 

@@ -22,6 +22,7 @@ from t6.verbs import (
     DrivePromoteSerialInput,
     DriveReceiveInput,
     DriveReleaseInput,
+    DriveReloadInput,
     DriveRetireInput,
     DriveReturnInput,
     DriveUnassignInput,
@@ -55,6 +56,7 @@ WRITES: dict[str, type[BaseModel]] = {
 # A scan carries its whole manifest, which the Outbox page would print and rewrite on every change, so a scan the API
 # cannot take is not queued: the custodian uploads it again, and the same form key keeps it one write.
 NOT_QUEUED = {"drive_catalog_snapshot"}
+RELOAD_SECONDS = 300.0  # reading every tab of the sheets takes the API minutes
 SLOW_SECONDS = 60.0  # saving a scan of thousands of files takes the API longer than a form edit
 
 
@@ -109,6 +111,8 @@ class Gateway:
         self.practice: ContextVar[bool | None] = ContextVar("practice", default=None)
         self._slow = copy.copy(client)
         self._slow.timeout = max(client.timeout, SLOW_SECONDS)
+        self._reloader = copy.copy(client)
+        self._reloader.timeout = max(client.timeout, RELOAD_SECONDS)
         self._tried = time.monotonic()
         self._projects_lock = threading.Lock()
         self._projects: tuple[float, list[dict[str, Any]], dict[str, dict[str, Any]]] | None = None
@@ -127,6 +131,15 @@ class Gateway:
         if "practice" in outcome.result:
             self.practice.set(outcome.result["practice"])
         return dict(outcome.result)
+
+    def reload(self, key: str, confirm: str | None = None) -> Outcome:
+        """`drive reload`: the preview, or with its token the reload. Never queued: it must run when asked."""
+        outcome = call(
+            self._reloader, "drive_reload", DriveReloadInput(idempotency_key=key, confirm=confirm)
+        )
+        if isinstance(outcome, Unavailable):
+            raise ApiUnavailable
+        return outcome
 
     def _project_cache(self) -> tuple[list[dict[str, Any]], dict[str, dict[str, Any]]]:
         from t6.verbs import ProjectListInput

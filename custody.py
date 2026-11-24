@@ -16,10 +16,12 @@ def register_custody(app: Flask, gateway: Gateway, csrf: Callable[[], str]) -> N
     @app.route("/drive/<drive_id>/retire", methods=["GET", "POST"])
     def record_custody(drive_id: str):
         if request.method == "GET":
-            gateway.read("drive_get", DriveGetInput(drive=drive_id))
+            drive = gateway.read("drive_get", DriveGetInput(drive=drive_id))["drive"]
             return render_template(
                 "custody_form.html",
                 drive_id=drive_id,
+                label=drive["label"],
+                serial=drive["serial"],
                 kinds={"retired": "drive_retire"} if request.path.endswith("/retire") else VERBS,
                 projects=gateway.projects(),
                 csrf=csrf(),

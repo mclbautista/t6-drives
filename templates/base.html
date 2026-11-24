@@ -17,7 +17,7 @@
 <a href="/projects"{% if path.startswith("/projects") %} aria-current="page"{% endif %}>Projects</a>
 <a href="/movements"{% if path.startswith("/movements") %} aria-current="page"{% endif %}>Movements</a>
 <a href="/exceptions"{% if path == "/exceptions" %} aria-current="page"{% endif %}>Exceptions</a>
-<a href="/outbox"{% if path == "/outbox" %} aria-current="page"{% endif %}>Outbox</a>
+<a href="/outbox"{% if path == "/outbox" %} aria-current="page"{% endif %}>{{ words.WAITING_TO_SEND }}</a>
 </nav>
 </div>
 </header>

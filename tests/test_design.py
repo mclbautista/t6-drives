@@ -4,7 +4,7 @@ import unittest
 
 from support import DriveAppCase
 
-NAV = ("Search", "Projects", "Movements", "Exceptions", "Outbox")
+NAV = ("Search", "Projects", "Movements", "Exceptions", "Waiting to send")
 
 
 class DesignTests(DriveAppCase):
@@ -39,7 +39,7 @@ class DesignTests(DriveAppCase):
             html = response.get_data(as_text=True)
             self.assertIn(role, html)
             self.assertIn("<style>", html)
-            self.assertIn(">Outbox</a>", html)
+            self.assertIn(">Waiting to send</a>", html)
         self.assertEqual([r.status_code for r, _ in pages], [400, 503, 202])
 
 

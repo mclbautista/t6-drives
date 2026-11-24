@@ -22,6 +22,7 @@ from t6.verbs import (
 
 from forms import finish, new_key, posted_key
 from gateway import ApiRefused, Gateway
+from glossary import looks_like_id
 
 # A scan of about 8,000 files is 1 to 2 MB of JSON. Every other form of this app stays at 64 KB.
 MANIFEST_BYTES = 12_000_000
@@ -56,7 +57,9 @@ def register_catalog(app: Flask, gateway: Gateway, csrf: Callable[[], str]) -> N
         if drive["qr_code"]:
             link = request.host_url + "qr/" + drive["qr_code"]
             picture = segno.make(link, error="m").svg_inline(scale=6, border=4)
-        return render_template("qr.html", d=drive, picture=picture)
+        return render_template(
+            "qr.html", d=drive, picture=picture, show_code=not looks_like_id(drive["qr_code"] or "")
+        )
 
     @app.get("/qr/<code>")
     def scan(code: str):

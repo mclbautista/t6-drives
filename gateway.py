@@ -32,6 +32,7 @@ from t6.verbs import (
     Refused,
 )
 
+from glossary import PROJECT_USE
 from outbox import Outbox
 
 log = logging.getLogger("drives.gateway")
@@ -98,7 +99,7 @@ def describe(outcome: Outcome) -> str:
     if isinstance(outcome, (Refused, NeedsPerson)):
         return outcome.reason
     if isinstance(outcome, Ambiguous):
-        return "More than one Assignment matches; end it from the Drive page."
+        return f"More than one {PROJECT_USE} matches; end it from the Drive page."
     return "The t6 API gave an answer this app cannot use."
 
 
@@ -150,8 +151,8 @@ class Gateway:
             return "Unresolved: " + ref["text"]
         found = self._project_cache()[1].get(ref["page_id"])
         if found is None:
-            return "Project " + ref["page_id"]
-        return f"{found['name']} (code: {found['project_code'] or 'unknown'}; T6 Project ID: {found['t6_id']})"
+            return "Unknown Project"
+        return str(found["name"])
 
     def _send(self, method: str, values: dict[str, Any], key: str) -> Outcome | Unavailable:
         """The verb's preview, then its confirm, both under `key`: sending it again is the same write."""

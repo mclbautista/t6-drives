@@ -2,11 +2,11 @@
 {% block title %}Correct movement{% endblock %}
 {% block content %}
 <div class="page-head"><h1>Correct movement</h1><a class="btn" href="/movements{% if m.drive %}?drive={{ m.drive|urlencode }}{% endif %}">Movement log</a></div>
-{% if error %}<div class="banner"><p role="alert">{{ error }}</p></div>{% endif %}
+{% if error %}<div class="banner"><p role="alert">{{ error|plain }}</p></div>{% endif %}
 <section class="card">
 <h2>Original entry</h2>
 <dl class="facts">
-<div><dt>Drive</dt><dd>{% if m.drive %}<a href="/drive/{{ m.drive }}">{{ m.label or m.drive }}</a>{% else %}{{ m.label or 'Unknown label' }} (no Drive yet){% endif %}</dd></div>
+<div><dt>Drive</dt><dd>{% if m.drive %}<a href="/drive/{{ m.drive }}">{{ m.label or "Drive without a label" }}</a>{% else %}{{ m.label or 'Unknown label' }} (no Drive yet){% endif %}</dd></div>
 <div><dt>Date</dt><dd>{{ m.on or 'Undated' }}</dd></div>
 <div><dt>Direction</dt><dd>{{ m.direction }}</dd></div>
 <div><dt>Person</dt><dd>{{ m.person or 'Unknown' }}</dd></div>
@@ -21,12 +21,12 @@
 <h2>Correction</h2>
 <p class="muted small">Leave a field as it is to keep it. Only what you change is sent.</p>
 <div class="fields">
-<div class="field"><label for="c-drive">Drive ID</label><input id="c-drive" name="drive" value="{{ values.get('drive') or '' }}"></div>
+<div class="field"><label for="c-drive">Drive (reference)</label><input id="c-drive" name="drive" value="{{ values.get('drive') or '' }}"></div>
 <div class="field"><label for="c-on">Date</label><input id="c-on" name="on" type="date" value="{{ values.get('on') or '' }}"></div>
 <div class="field"><label for="c-direction">Direction</label><select id="c-direction" name="direction">{% for choice in ['IN', 'OUT'] %}<option{% if (values.get('direction') or m.direction) == choice %} selected{% endif %}>{{ choice }}</option>{% endfor %}</select></div>
 <div class="field"><label for="c-person">Person</label><input id="c-person" name="person" value="{{ values.get('person') or '' }}"></div>
 <div class="field"><label for="c-place">Place</label><select id="c-place" name="place"><option value="{{ keep }}" selected>Keep: {{ m.place or 'none' }}</option><option value="none">No place</option>{% for place in places %}<option>{{ place }}</option>{% endfor %}</select></div>
-<div class="field"><label for="c-project">Project</label><select id="c-project" name="project"><option value="{{ keep }}" selected>Keep: {{ display(m.project) }}</option>{% for p in projects %}<option value="{{ p.t6_id }}">{{ p.name }} — {{ p.project_code or 'unknown code' }} — {{ p.t6_id }}</option>{% endfor %}</select></div>
+<div class="field"><label for="c-project">Project</label><select id="c-project" name="project"><option value="{{ keep }}" selected>Keep: {{ display(m.project) }}</option>{% for p in projects %}<option value="{{ p.t6_id }}">{{ p.name }}</option>{% endfor %}</select></div>
 </div>
 <div class="form-actions"><button class="btn btn--primary">Save correction</button><a class="btn btn--quiet" href="/movements{% if m.drive %}?drive={{ m.drive|urlencode }}{% endif %}">Cancel</a></div>
 </form>

@@ -1,10 +1,12 @@
 {% extends "base.html" %}
 {% from "_macros.html" import status_badge, review_chip %}
-{% block title %}Drive {{ d.id }}{% endblock %}
+{% block title %}{{ d.label or 'Drive without a label' }}{% endblock %}
 {% block content %}
 <div class="page-head">
 <div class="title-block">
-<h1>Drive {{ d.id }}</h1>
+<h1>{{ d.label or 'Drive without a label' }}</h1>
+<p class="drive-sub">{% if d.serial %}<span class="serial"><span class="vh">Serial: </span>{{ d.serial }}</span>{% else %}<span class="muted">No serial</span>{% endif %}{% for a in assignments if a.open %} · <span>{{ display(a.project) }}</span>{% else %} · <span class="muted">No open Project use</span>{% endfor %}</p>
+<details class="ids"><summary>Details</summary><p>Drive ID: <span class="mono">{{ d.id }}</span></p></details>
 <div class="badges">{{ status_badge(d.status) }}{% if d.needs_review %}{{ review_chip() }}{% endif %}</div>
 </div>
 <div class="actions"><a class="btn" href="/movements?drive={{ d.id|urlencode }}">Movements</a><a class="btn" href="/drive/{{ d.id }}/catalog">Contents</a><a class="btn" href="/drive/{{ d.id }}/qr">QR label</a><a class="btn" href="/drive/{{ d.id }}/edit">Edit</a><a class="btn btn--primary" href="/drive/{{ d.id }}/retire">Retire</a></div>
@@ -13,8 +15,8 @@
 <div class="stack">
 <section class="card">
 <h2>Facts</h2>
-<dl class="facts">{% for name in fields %}{% if d.get(name) is not none %}<div><dt>{{ labels.get(name, name|capitalize) }}</dt><dd{% if name == 'serial' %} class="mono"{% elif name == 'suspected_serial' %} class="mono suspected"{% endif %}>{{ d[name] }}</dd></div>{% endif %}{% endfor %}<div><dt>Ownership</dt><dd>{{ ownership }}</dd></div><div><dt>Needs review</dt><dd>{{ 'Yes' if d.needs_review else 'No' }}</dd></div></dl>
-{% if d.suspected_serial %}<div class="card-foot"><p class="muted small">The suspected serial is uncertain until you confirm it.</p><form method="post" action="/drive/{{ d.id }}/promote">{% include "_hidden.html" %}<button class="btn">Promote suspected serial to accepted</button></form></div>{% endif %}
+<dl class="facts">{% for name in fields %}{% if d.get(name) is not none and (name != 'qr_code' or not words.looks_like_id(d.qr_code)) %}<div><dt>{{ labels.get(name, name|capitalize) }}</dt><dd{% if name == 'serial' %} class="mono"{% elif name == 'suspected_serial' %} class="mono suspected"{% endif %}>{{ d[name] }}</dd></div>{% endif %}{% endfor %}<div><dt>Ownership</dt><dd>{{ ownership }}</dd></div><div><dt>Needs review</dt><dd>{{ 'Yes' if d.needs_review else 'No' }}</dd></div></dl>
+{% if d.suspected_serial %}<div class="card-foot"><p class="muted small">The serial to check is uncertain until you confirm it.</p><form method="post" action="/drive/{{ d.id }}/promote">{% include "_hidden.html" %}<button class="btn">{{ words.CONFIRM_SERIAL }}</button></form></div>{% endif %}
 </section>
 <section class="card">
 <h2>Place and ownership</h2>
@@ -31,28 +33,28 @@
 <div class="stack">{{ history|safe }}</div>
 </div>
 <section class="assign">
-<h2>Project use / Assignment history</h2>
-<p class="muted">Assignments record Project use, not physical custody.</p>
+<h2>{{ words.PROJECT_USE }} history</h2>
+<p class="muted">Project use is which Project a Drive is used for, not where the Drive is.</p>
 {% if assignments %}<ul class="assignments">{% for a in assignments %}<li data-assignment-id="{{ a.number }}" class="{{ 'is-open' if a.open else 'is-ended' }}">
 <div class="a-main"><strong class="a-project">{{ display(a.project) }}</strong><span class="meta">Label: {{ a.label or 'Unknown' }}</span><span class="meta">Role: {{ a.role or 'Unknown' }}</span></div>
 <div class="a-dates"><span class="meta">Start: {{ a.start or 'Unknown' }}</span><span class="meta">End: {{ a.end or 'Open' }}</span></div>
 {% if a.remarks %}<p class="a-remarks">{{ a.remarks }}</p>{% endif %}
-{% if a.open %}<form class="inline" method="post" action="/drive/{{ d.id }}/assignments/{{ a.number }}/end">{% include "_hidden.html" %}<label for="end-{{ a.number }}">End date</label><input id="end-{{ a.number }}" name="end" type="date" required><button class="btn">End Assignment</button></form>{% endif %}
+{% if a.open %}<form class="inline" method="post" action="/drive/{{ d.id }}/assignments/{{ a.number }}/end">{% include "_hidden.html" %}<label for="end-{{ a.number }}">End date</label><input id="end-{{ a.number }}" name="end" type="date" required><button class="btn">End Project use</button></form>{% endif %}
 </li>{% endfor %}</ul>
-{% else %}<div class="card empty"><p class="empty-title">No Assignments yet.</p><p class="muted">Add one below to record which Project is using this Drive.</p></div>{% endif %}
+{% else %}<div class="card empty"><p class="empty-title">No Project use yet.</p><p class="muted">Add one below to record which Project is using this Drive.</p></div>{% endif %}
 <div class="form-card form-card--inset">
-<h3>Add Assignment</h3>
+<h3>Add Project use</h3>
 <form method="post" action="/drive/{{ d.id }}/assignments">
 {% include "_hidden.html" %}
 <div class="fields">
-<div class="field field--wide"><label for="a-project">Project</label><select id="a-project" name="project">{% for p in projects %}<option value="{{ p.t6_id }}">{{ p.name }} — {{ p.project_code or 'unknown code' }} — {{ p.t6_id }}</option>{% endfor %}</select></div>
-<div class="field"><label for="a-label">Assignment label</label><input id="a-label" name="label"></div>
+<div class="field field--wide"><label for="a-project">Project</label><select id="a-project" name="project">{% for p in projects %}<option value="{{ p.t6_id }}">{{ p.name }}</option>{% endfor %}</select></div>
+<div class="field"><label for="a-label">Project use label</label><input id="a-label" name="label"></div>
 <div class="field"><label for="a-role">Role</label><select id="a-role" name="role">{% for role in roles %}<option>{{ role }}</option>{% endfor %}</select></div>
 <div class="field"><label for="a-start">Start date</label><input id="a-start" name="start" type="date"></div>
 <div class="field"><label for="a-end">End date (optional)</label><input id="a-end" name="end" type="date"></div>
 <div class="field field--wide"><label for="a-remarks">Remarks</label><input id="a-remarks" name="remarks"></div>
 </div>
-<div class="form-actions"><button class="btn btn--primary">Add Assignment</button></div>
+<div class="form-actions"><button class="btn btn--primary">Add Project use</button></div>
 </form>
 </div>
 </section>

@@ -44,8 +44,8 @@ class InventoryTests(DriveAppCase):
         self.assertIn("Custody status: in custody", html)
         self.assertIn("Custody status: released", html)
         self.assertIn("Custody status: unknown", html)
-        self.assertIn("Accepted: SYNTH-A", html)
-        self.assertIn("Suspected (uncertain): MAYBE-9", html)
+        self.assertIn("Serial: </span>SYNTH-A", html)
+        self.assertIn("Serial to check: MAYBE-9", html)
         self.assertIn("Needs review", html)
 
     def test_filters_combine_and_match_the_inventory_screen_rules(self):

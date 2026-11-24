@@ -1,12 +1,12 @@
 {% extends "base.html" %}
-{% block title %}QR label {{ d.id }}{% endblock %}
+{% block title %}QR label{% endblock %}
 {% block content %}
 <div class="page-head"><h1>QR label</h1><div class="actions"><a class="btn" href="/drive/{{ d.id }}">Back to Drive</a></div></div>
 {% if picture %}
 <section class="qr-label card" aria-label="Printable label">
 <div class="qr-picture">{{ picture|safe }}</div>
 <div class="qr-text">
-<p class="qr-code mono">{{ d.qr_code }}</p>
+{% if show_code %}<p class="qr-code mono">{{ d.qr_code }}</p>{% endif %}
 {% if d.label %}<p><strong>{{ d.label }}</strong></p>{% endif %}
 {% if d.serial %}<p class="mono">{{ d.serial }}</p>{% endif %}
 {% if d.office_location %}<p>{{ d.office_location }}</p>{% endif %}

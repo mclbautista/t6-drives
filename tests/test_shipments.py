@@ -68,7 +68,7 @@ class ShipmentTests(DriveAppCase):
             "blue",
             "4.0",
             "Needs review; check",
-            "Unknown accepted serial",
+            "Unknown serial",
             "Unknown capacity",
             "Print manifest",
         ):
@@ -141,7 +141,7 @@ class ShipmentTests(DriveAppCase):
         response = self.release([self.a, self.b])
         html = response.get_data(as_text=True)
         self.assertEqual(response.status_code, 409)
-        self.assertIn(f"Cannot release Drive {self.a} (released)", html)
+        self.assertIn("Cannot release a Drive (released)", html)
         self.assertIn("Nothing was recorded", html)
         self.assertIn('<form method="post">', html)
         self.assertEqual(self.api.drive(self.b)["events"], [])

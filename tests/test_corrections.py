@@ -113,7 +113,11 @@ class PlaceAndOwnershipTests(CorrectionCase):
     def search_line(self, drive: str) -> str:
         html = self.text("/")
         found = re.search(
-            r"<li><a class=\"c-id mono\" href=\"/drive/" + drive + r"\">.*?</li>", html, re.DOTALL
+            r"<li>\s*<div class=\"c-name\"><a class=\"c-id\" href=\"/drive/"
+            + drive
+            + r"\">.*?</li>",
+            html,
+            re.DOTALL,
         )
         assert found is not None
         return found.group()
@@ -238,8 +242,8 @@ class ExceptionsPageTests(CorrectionCase):
         self.assertEqual(response.headers["Location"], "/exceptions")
         listed = self.api.read("drive_capture_list", DriveCaptureListInput)
         self.assertEqual(listed["captures"], [])
-        self.assertIn("given to Drive", self.text("/exceptions"))
-        self.assertNotIn("given to Drive", self.text("/exceptions"))
+        self.assertIn("was given a Drive", self.text("/exceptions"))
+        self.assertNotIn("was given a Drive", self.text("/exceptions"))
         # t6's worker resolves it as a normal movement.
         self.api.resolve_capture(capture, revision=1)
         self.assertEqual(self.status(drive), "released")

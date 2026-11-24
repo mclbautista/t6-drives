@@ -145,7 +145,6 @@ class DriveDetailTests(DriveAppCase):
         drive = self.api.add_drive(label="Synthetic one", serial="SYN-9", ownership_known=False)
         html = self.text("/drive/" + drive)
         for shown in (
-            f"Drive {drive}",
             "Synthetic one",
             "SYN-9",
             "Custody status: unknown",
@@ -350,13 +349,13 @@ class PromoteTests(DriveAppCase):
     def test_promotion_is_explicit_and_moves_the_suspected_serial_to_accepted(self):
         drive = self.api.add_drive(label="Synthetic", suspected_serial="cand 1")
         page = f"/drive/{drive}"
-        self.assertIn("Promote suspected serial to accepted", self.text(page))
+        self.assertIn("Confirm serial", self.text(page))
         self.assertEqual(self.api.drive(drive)["drive"]["serial"], None)
         response = self.submit(page + "/promote", form=page)
         self.assertEqual((response.status_code, response.headers["Location"]), (303, page))
         after = self.api.drive(drive)["drive"]
         self.assertEqual((after["serial"], after["suspected_serial"]), ("CAND 1", None))
-        self.assertNotIn("Promote suspected serial to accepted", self.text(page))
+        self.assertNotIn("Confirm serial", self.text(page))
 
     def test_a_serial_taken_by_another_drive_cannot_be_promoted(self):
         self.api.add_drive(label="Holder", serial="CAND 1")
@@ -370,7 +369,7 @@ class PromoteTests(DriveAppCase):
         drive = self.api.add_drive(label="Synthetic", serial="SYN-1")
         page = self.submit(f"/drive/{drive}/promote", form="/new")
         self.assertEqual(page.status_code, 400)
-        self.assertIn("no suspected serial", page.get_data(as_text=True))
+        self.assertIn("no serial to check", page.get_data(as_text=True))
 
     def test_promoting_an_unknown_drive_is_not_found(self):
         drive = self.api.add_drive(label="Synthetic", suspected_serial="x1")

@@ -26,6 +26,7 @@ from t6.verbs import (
 from t6.vocabulary import DRIVE_ROLES
 from werkzeug.exceptions import HTTPException, NotFound
 
+import glossary
 from catalog import allow_manifest, register_catalog
 from custody import register_custody
 from forms import finish, new_key, notice, posted_key
@@ -53,12 +54,12 @@ ADD_FIELDS = (
     "qr_code",
 )
 LABELS = {
-    "serial": "Accepted serial",
-    "suspected_serial": "Suspected serial (uncertain)",
+    "serial": "Serial",
+    "suspected_serial": "Serial to check",
     "capacity_tb": "Capacity (TB)",
     "format": "Filesystem",
     "form_factor": "Form factor",
-    "owner_studio_id": "Owner Studio ID (existing reference only)",
+    "owner_studio_id": "Owner Studio (existing reference only)",
     "purchase_date": "Purchase date",
     "review_note": "Review note",
     "office_location": "Office location",
@@ -140,6 +141,12 @@ def create_app(
         gateway.practice.set(None)
         if request.path != "/health":
             gateway.retry()
+
+    app.jinja_env.filters["plain"] = glossary.plain
+
+    @app.context_processor
+    def plain_words():
+        return {"words": glossary}
 
     @app.context_processor
     def practice_banner():
@@ -585,7 +592,7 @@ def create_app(
         )
 
         def done(_: Any) -> str:
-            session["flash"] = f"Capture given to Drive {drive}. It becomes a movement shortly."
+            session["flash"] = "The photo was given a Drive. It becomes a movement shortly."
             return "/exceptions"
 
         return finish(
@@ -620,7 +627,10 @@ def create_app(
     @app.get("/outbox")
     def show_outbox():
         return render_template(
-            "outbox.html", entries=gateway.outbox.entries(), csrf=csrf(), new_key=new_key
+            "outbox.html",
+            entries=[glossary.waiting_entry(e) for e in gateway.outbox.entries()],
+            csrf=csrf(),
+            new_key=new_key,
         )
 
     @app.post("/outbox/<key>/dismiss")

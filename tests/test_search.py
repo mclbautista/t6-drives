@@ -4,7 +4,7 @@ import re
 from urllib.parse import urlencode
 
 from support import DriveAppCase
-from t6.verbs import Done, DriveListInput, DriveReleaseInput, Preview, ProjectListInput
+from t6.verbs import DriveListInput, DriveReleaseInput, ProjectListInput
 
 
 class SearchTests(DriveAppCase):

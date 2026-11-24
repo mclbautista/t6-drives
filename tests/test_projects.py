@@ -148,3 +148,78 @@ class ProjectTests(DriveAppCase):
                     self.assertIn("released", html)
                     self.assertIn("Synthetic missing", html)
                     self.assertLess(html.index("2026-11-03"), html.index("2026-11-01"))
+
+
+class ProjectSearchTests(DriveAppCase):
+    """Search, filters and sorts of the Projects page, from the API's counts."""
+
+    def names(self, query: str = "") -> list[str]:
+        """The Projects shown, in order, as the page prints them."""
+        html = self.text("/projects" + query)
+        return re.findall(
+            r'<li data-project="[^"]*"><article class="card">\s*<h2><a [^>]*>([^<]*)</a>', html
+        )
+
+    def build(self) -> None:
+        load_projects(self)  # violet: 2 drives, 1 out; text project: 1 drive, name only
+        alpha = self.api.project("Synthetic alpha")
+        for number in range(3):
+            drive = self.api.add_drive(label=f"Alpha {number}", serial=f"SYN-ALPHA-{number}")
+            self.api.assign(drive, alpha, f"A{number}", "backup")
+
+    def test_search_finds_a_project_by_part_of_its_name_in_any_case(self):
+        self.build()
+        self.assertEqual(self.names("?q=ALPH"), ["Synthetic alpha"])
+        self.assertEqual(self.names("?q=text"), ["Unresolved: Synthetic text project"])
+        self.assertEqual(self.names("?q=nothing-like-this"), [])
+        self.assertIn("No Projects match", self.text("/projects?q=nothing-like-this"))
+        self.assertEqual(len(self.names("?q=synthetic")), 3)
+
+    def test_search_finds_a_project_by_its_code(self):
+        from t6.notion.testing import title
+
+        page = self.api.notion.add_page("projects", {"Name": title("Synthetic coded")})
+        self.api.registry.register(
+            actor="setup", idempotency_key="coded", notion_page_id=page["id"], code="ZQX-77"
+        )
+        drive = self.api.add_drive(label="Coded drive", serial="SYN-CODED")
+        from t6.verbs import ProjectListInput
+
+        registered = self.api.read("project_list", ProjectListInput)["projects"]
+        project = next(p["t6_id"] for p in registered if p["name"] == "Synthetic coded")
+        self.api.assign(drive, project, "C1", "backup")
+        self.assertEqual(self.names("?q=zqx"), ["Synthetic coded"])
+        self.assertEqual(self.names("?q=Synthetic+coded"), ["Synthetic coded"])
+
+    def test_filters_narrow_the_list_and_combine(self):
+        self.build()
+        self.assertEqual(self.names("?out=1"), ["Unresolved: Synthetic violet"])
+        self.assertEqual(self.names("?kind=registered"), ["Synthetic alpha"])
+        self.assertEqual(
+            sorted(self.names("?kind=name_only")),
+            ["Unresolved: Synthetic text project", "Unresolved: Synthetic violet"],
+        )
+        self.assertEqual(self.names("?kind=name_only&out=1"), ["Unresolved: Synthetic violet"])
+        self.assertEqual(self.names("?kind=registered&out=1"), [])
+        self.assertEqual(
+            self.names("?kind=name_only&q=text"), ["Unresolved: Synthetic text project"]
+        )
+
+    def test_sorts_order_the_list_as_named(self):
+        self.build()
+        plain = lambda query: [n.removeprefix("Unresolved: ") for n in self.names(query)]
+        self.assertEqual(self.names(), self.names("?sort=az"))
+        self.assertEqual(
+            plain("?sort=az"), ["Synthetic alpha", "Synthetic text project", "Synthetic violet"]
+        )
+        self.assertEqual(
+            plain("?sort=total"), ["Synthetic alpha", "Synthetic violet", "Synthetic text project"]
+        )
+        self.assertEqual(plain("?sort=out")[0], "Synthetic violet")
+
+    def test_an_unknown_sort_or_filter_value_is_ignored_and_the_form_keeps_what_was_typed(self):
+        self.build()
+        self.assertEqual(len(self.names("?sort=bogus&kind=bogus")), 3)
+        page = self.text("/projects?q=alph&out=1&kind=registered&sort=total")
+        for kept in ('value="alph"', 'name="out" value="1" checked', 'value="total" selected'):
+            self.assertIn(kept, page)

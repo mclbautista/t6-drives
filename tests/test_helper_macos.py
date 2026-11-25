@@ -2,6 +2,7 @@
 
 import json
 import os
+import plistlib
 import re
 import shutil
 import subprocess
@@ -38,7 +39,16 @@ class QuietHandler(WSGIRequestHandler):
 class HelperStaticTests(unittest.TestCase):
     def test_no_python_anywhere_in_helper_and_shell_syntax_is_valid(self) -> None:
         files = sorted(p for p in HELPER_DIR.iterdir() if p.is_file())
-        self.assertGreaterEqual(len(files), 3)
+        names = {p.name for p in files}
+        for expected in (
+            "t6-drive-scan",
+            "t6-drive-send",
+            "t6-drive-agent",
+            "build-scan-drive-app",
+            "Scan Drive.applescript",
+            "dev.t6.drives-helper.plist",
+        ):
+            self.assertIn(expected, names)
         zsh_bin = shutil.which("zsh")
 
         for path in files:
@@ -67,6 +77,32 @@ class HelperStaticTests(unittest.TestCase):
                             f"zsh -n failed on {path.name}: {res.stderr}",
                         )
 
+    def test_launchd_plist_is_valid_and_matches_contract(self) -> None:
+        plist_path = HELPER_DIR / "dev.t6.drives-helper.plist"
+        data = plistlib.loads(plist_path.read_bytes())
+        self.assertEqual(data["Label"], "dev.t6.drives-helper")
+        self.assertEqual(
+            data["ProgramArguments"],
+            ["/Library/Application Support/t6-drives-helper/t6-drive-agent"],
+        )
+        self.assertEqual(data["WatchPaths"], ["/Volumes"])
+        self.assertEqual(data["StartInterval"], 900)
+        self.assertEqual(data["Nice"], 10)
+        self.assertIs(data["LowPriorityIO"], True)
+        self.assertEqual(data["ProcessType"], "Background")
+
+        plutil_bin = shutil.which("plutil")
+        if sys.platform == "darwin":
+            self.assertIsNotNone(plutil_bin, "plutil must exist on macOS")
+        if plutil_bin is not None:
+            res = subprocess.run(
+                [plutil_bin, "-lint", str(plist_path)],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(res.returncode, 0, f"plutil -lint failed: {res.stdout} {res.stderr}")
+
 
 @unittest.skipUnless(sys.platform == "darwin", "requires macOS")
 class HelperMacOSE2ETests(DriveAppCase):
@@ -86,6 +122,11 @@ class HelperMacOSE2ETests(DriveAppCase):
         self.base_url = f"http://127.0.0.1:{self.server.server_port}"
 
         self.work = Path(self.directory)
+        self.volumes_dir = self.work / "volumes"
+        self.volumes_dir.mkdir(parents=True, exist_ok=True)
+        self.state_dir = self.work / "state"
+        self.log_dir = self.work / "logs"
+
         self.trap_bin = self.work / "trap_bin"
         self.trap_bin.mkdir()
         for name in ("python", "python3"):
@@ -134,7 +175,7 @@ class HelperMacOSE2ETests(DriveAppCase):
         self.open_stub.chmod(0o755)
 
     def make_volume(self, name: str = "Shuttle_Vol_01") -> Path:
-        vol = self.work / "volumes" / name
+        vol = self.volumes_dir / name
         vol.mkdir(parents=True, exist_ok=True)
         (vol / "notes.txt").write_bytes(b"hello")
         show_a = vol / "Show A"
@@ -160,11 +201,13 @@ class HelperMacOSE2ETests(DriveAppCase):
         (vol / "._notes.txt").write_bytes(b"ad")
         return vol
 
-    def write_config(self, confirm: str) -> Path:
-        cfg = self.work / f"config-{confirm}"
+    def write_config(
+        self, confirm: str, *, url: str | None = None, filename: str | None = None
+    ) -> Path:
+        cfg = self.work / (filename or f"config-{confirm}")
         cfg.write_text(
             "# Custodian Mac helper config\n"
-            f"url = {self.base_url}\n"
+            f"url = {url or self.base_url}\n"
             f"token = {TOKEN}\n"
             f"confirm = {confirm}\n"
         )
@@ -178,10 +221,16 @@ class HelperMacOSE2ETests(DriveAppCase):
         label_value: str = "",
         label_exit: int = 0,
         confirm_exit: int = 0,
+        rescan_seconds: int | None = None,
+        max_bytes: int | None = None,
     ) -> dict[str, str]:
         env = dict(os.environ)
         env["PATH"] = f"{self.trap_bin}:{env.get('PATH', '')}"
         env["T6_HELPER_CONFIG"] = str(cfg)
+        env["T6_HELPER_VOLUMES_DIR"] = str(self.volumes_dir)
+        env["T6_HELPER_STATE_DIR"] = str(self.state_dir)
+        env["T6_HELPER_LOG_DIR"] = str(self.log_dir)
+        env["T6_HELPER_BIN_DIR"] = str(HELPER_DIR)
         env["T6_HELPER_SERIAL_CMD"] = str(self.serial_stub)
         env["T6_HELPER_DIALOG_CMD"] = str(self.dialog_stub)
         env["T6_HELPER_OPEN_CMD"] = str(self.open_stub)
@@ -189,6 +238,10 @@ class HelperMacOSE2ETests(DriveAppCase):
         env["STUB_LABEL_VALUE"] = label_value
         env["STUB_LABEL_EXIT"] = str(label_exit)
         env["STUB_CONFIRM_EXIT"] = str(confirm_exit)
+        if rescan_seconds is not None:
+            env["T6_HELPER_RESCAN_SECONDS"] = str(rescan_seconds)
+        if max_bytes is not None:
+            env["T6_HELPER_MAX_BYTES"] = str(max_bytes)
         return env
 
     def run_scan_and_send(
@@ -221,6 +274,17 @@ class HelperMacOSE2ETests(DriveAppCase):
         )
         return scan_doc, send_proc
 
+    def run_agent(self, env: dict[str, str]) -> subprocess.CompletedProcess[str]:
+        proc = subprocess.run(
+            [str(HELPER_DIR / "t6-drive-agent")],
+            env=env,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(proc.returncode, 0, f"agent failed: {proc.stderr}")
+        return proc
+
     def clear_logs(self) -> None:
         for log in (self.serial_log, self.dialog_log, self.open_log):
             if log.exists():
@@ -230,6 +294,17 @@ class HelperMacOSE2ETests(DriveAppCase):
         if not path.exists():
             return []
         return [line for line in path.read_text(encoding="utf-8").splitlines() if line]
+
+    def helper_log_lines(self) -> list[str]:
+        return self.read_lines(self.log_dir / "helper.log")
+
+    def work_files(self) -> list[Path]:
+        work_dir = self.state_dir / "work"
+        return sorted(work_dir.iterdir()) if work_dir.exists() else []
+
+    def queue_files(self) -> list[Path]:
+        queue_dir = self.state_dir / "queue"
+        return sorted(queue_dir.iterdir()) if queue_dir.exists() else []
 
     def test_ask_mode_scan_preview_confirm_save_and_open_by_serial(self) -> None:
         drive_id = self.api.add_drive(label="Shuttle Ask Drive", serial="SN-MAC-ASK-1")
@@ -328,10 +403,10 @@ class HelperMacOSE2ETests(DriveAppCase):
 
         vol = self.make_volume("UNKNOWN_VOL")
 
-        # Silent mode: no dialog, no open, catalog stays empty.
+        # Silent mode: no dialog, no open, exits 10 (no_drive), catalog stays empty.
         silent_env = self.helper_env(self.write_config("silent"), serial="")
         _, silent_send = self.run_scan_and_send(vol, silent_env)
-        self.assertNotEqual(silent_send.returncode, 0)
+        self.assertEqual(silent_send.returncode, 10, silent_send.stderr)
         self.assertEqual(self.read_lines(self.dialog_log), [])
         self.assertEqual(self.read_lines(self.open_log), [])
         self.assertEqual(
@@ -341,13 +416,22 @@ class HelperMacOSE2ETests(DriveAppCase):
             [],
         )
 
-        # Ask mode: canceling the label prompt aborts cleanly after one prompt.
+        # Ask mode: canceling or leaving the label prompt empty exits 10 (waiting) so queued scans stay queued.
         self.clear_logs()
         cancel_label_env = self.helper_env(
             self.write_config("ask"), serial="", label_exit=1, label_value="TYPED_ASSIGN_LABEL"
         )
         _, cancel_send = self.run_scan_and_send(vol, cancel_label_env)
-        self.assertEqual(cancel_send.returncode, 0, cancel_send.stderr)
+        self.assertEqual(cancel_send.returncode, 10, cancel_send.stderr)
+        self.assertEqual(self.read_lines(self.dialog_log), ["label UNKNOWN_VOL"])
+        self.assertEqual(self.read_lines(self.open_log), [])
+
+        self.clear_logs()
+        empty_label_env = self.helper_env(
+            self.write_config("ask"), serial="", label_exit=0, label_value="   "
+        )
+        _, empty_send = self.run_scan_and_send(vol, empty_label_env)
+        self.assertEqual(empty_send.returncode, 10, empty_send.stderr)
         self.assertEqual(self.read_lines(self.dialog_log), ["label UNKNOWN_VOL"])
         self.assertEqual(self.read_lines(self.open_log), [])
 
@@ -394,6 +478,249 @@ class HelperMacOSE2ETests(DriveAppCase):
         )
         self.assertTrue((built_app / "Contents" / "Resources" / "t6-drive-scan").is_file())
         self.assertTrue((built_app / "Contents" / "Resources" / "t6-drive-send").is_file())
+
+    def test_agent_mount_rescan_unmount_sends_updated_scan_and_ignores_symlinks(self) -> None:
+        drive_id = self.api.add_drive(label="Agent Drive", serial="SN-AGENT-1")
+        cfg = self.write_config("silent")
+        env = self.helper_env(cfg, serial="SN-AGENT-1", rescan_seconds=0)
+
+        # Symlink and dotfile directory in VOLUMES_DIR must be ignored.
+        (self.volumes_dir / "Macintosh HD").symlink_to("/")
+        (self.volumes_dir / ".hidden_vol").mkdir()
+
+        vol = self.make_volume("AGENT_VOL")
+        self.run_agent(env)
+
+        self.assertTrue((self.state_dir / "work" / "AGENT_VOL.json").is_file())
+        self.assertTrue((self.state_dir / "work" / "AGENT_VOL.ts").is_file())
+        self.assertFalse((self.state_dir / "work" / "Macintosh HD.json").exists())
+        self.assertFalse((self.state_dir / "work" / ".hidden_vol.json").exists())
+        self.assertEqual(self.queue_files(), [])
+        self.assertEqual(
+            self.api.read("drive_catalog_snapshots", DriveCatalogSnapshotsInput, drive=drive_id)[
+                "snapshots"
+            ],
+            [],
+        )
+
+        # Add file between rescans; rescan picks it up.
+        (vol / "late_addition.mov").write_bytes(b"late-clip")
+        self.run_agent(env)
+        self.assertEqual(self.queue_files(), [])
+        self.assertEqual(
+            self.api.read("drive_catalog_snapshots", DriveCatalogSnapshotsInput, drive=drive_id)[
+                "snapshots"
+            ],
+            [],
+        )
+
+        # Unmount sends one scan containing the newly added file and empties work/ and queue/.
+        shutil.rmtree(vol)
+        self.run_agent(env)
+
+        self.assertEqual(self.work_files(), [])
+        self.assertEqual(self.queue_files(), [])
+        self.assertEqual(self.read_lines(self.dialog_log), [])
+        self.assertEqual(self.read_lines(self.open_log), [])
+
+        snaps = self.api.read(
+            "drive_catalog_snapshots", DriveCatalogSnapshotsInput, drive=drive_id
+        )["snapshots"]
+        self.assertEqual(len(snaps), 1)
+        at = self.api.read(
+            "drive_catalog_at", DriveCatalogAtInput, drive=drive_id, on=snaps[0]["captured_on"]
+        )
+        by_path = {e["path"]: e for e in at["entries"]}
+        self.assertIn("late_addition.mov", by_path)
+        self.assertEqual(by_path["late_addition.mov"]["size_bytes"], 9)
+
+        logs = self.helper_log_lines()
+        self.assertTrue(any(" taken " in line and "AGENT_VOL" in line for line in logs), logs)
+        self.assertTrue(any(" sent " in line and "AGENT_VOL" in line for line in logs), logs)
+
+    def test_agent_two_eject_sessions_on_one_day_produce_two_catalog_scans(self) -> None:
+        drive_id = self.api.add_drive(label="Two Sessions Drive", serial="SN-TWO-SESS")
+        cfg = self.write_config("silent")
+        env = self.helper_env(cfg, serial="SN-TWO-SESS")
+
+        # Session 1
+        vol1 = self.make_volume("SESS_VOL")
+        self.run_agent(env)
+        # With default 900s interval, an immediate second wake does not rescan.
+        (vol1 / "between_rescans.txt").write_bytes(b"skip")
+        self.run_agent(env)
+        shutil.rmtree(vol1)
+        self.run_agent(env)
+
+        snaps1 = self.api.read(
+            "drive_catalog_snapshots", DriveCatalogSnapshotsInput, drive=drive_id
+        )["snapshots"]
+        self.assertEqual(len(snaps1), 1)
+        at1 = self.api.read(
+            "drive_catalog_at", DriveCatalogAtInput, drive=drive_id, on=snaps1[0]["captured_on"]
+        )
+        self.assertNotIn("between_rescans.txt", {e["path"] for e in at1["entries"]})
+
+        # Ensure second session captured_on timestamp is strictly later than session 1.
+        time.sleep(1.1)
+
+        # Session 2 on the same day
+        vol2 = self.make_volume("SESS_VOL")
+        (vol2 / "session2.mov").write_bytes(b"second-eject")
+        self.run_agent(env)
+        shutil.rmtree(vol2)
+        self.run_agent(env)
+
+        snaps2 = self.api.read(
+            "drive_catalog_snapshots", DriveCatalogSnapshotsInput, drive=drive_id
+        )["snapshots"]
+        self.assertEqual(len(snaps2), 2)
+        at2 = self.api.read(
+            "drive_catalog_at", DriveCatalogAtInput, drive=drive_id, on=snaps2[1]["captured_on"]
+        )
+        self.assertIn("session2.mov", {e["path"] for e in at2["entries"]})
+
+    def test_agent_queues_when_api_down_and_sends_on_next_wake_when_up(self) -> None:
+        import socket
+
+        drive_id = self.api.add_drive(label="Outage Agent Drive", serial="SN-OUTAGE-AGENT")
+        cfg = self.write_config("silent")
+        env = self.helper_env(cfg, serial="SN-OUTAGE-AGENT")
+
+        vol = self.make_volume("OUTAGE_VOL")
+        self.run_agent(env)
+
+        self.api.mode = "down"
+        shutil.rmtree(vol)
+        self.run_agent(env)
+
+        self.assertEqual(self.work_files(), [])
+        queued = self.queue_files()
+        self.assertEqual(len(queued), 1)
+        queued_key = json.loads(queued[0].read_text(encoding="utf-8"))["idempotency_key"]
+        self.assertTrue(queued_key)
+        self.assertNotIn("/v1/drive/catalog-snapshot", self.api.requests)
+        logs = self.helper_log_lines()
+        self.assertTrue(any(" waiting " in line and "try_later" in line for line in logs), logs)
+
+        # Network/connection failure also keeps the scan queued with the same idempotency_key.
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+            sock.bind(("127.0.0.1", 0))
+            closed_port = sock.getsockname()[1]
+        down_cfg = self.write_config(
+            "silent", url=f"http://127.0.0.1:{closed_port}", filename="config-closed"
+        )
+        self.run_agent(self.helper_env(down_cfg, serial="SN-OUTAGE-AGENT"))
+        queued_after_net = self.queue_files()
+        self.assertEqual(len(queued_after_net), 1)
+        self.assertEqual(
+            json.loads(queued_after_net[0].read_text(encoding="utf-8"))["idempotency_key"],
+            queued_key,
+        )
+
+        # Next agent wake after API returns sends it and empties queue/.
+        self.api.mode = "up"
+        self.run_agent(env)
+        self.assertEqual(self.queue_files(), [])
+        snaps = self.api.read(
+            "drive_catalog_snapshots", DriveCatalogSnapshotsInput, drive=drive_id
+        )["snapshots"]
+        self.assertEqual(len(snaps), 1)
+        logs = self.helper_log_lines()
+        self.assertTrue(any(" sent " in line and queued_key in line for line in logs), logs)
+
+    def test_agent_unknown_serial_waits_in_queue_then_sends_after_drive_add(self) -> None:
+        silent_env = self.helper_env(self.write_config("silent"), serial="SN-NEW-DRIVE-1")
+        vol = self.make_volume("UNKNOWN_SERIAL_VOL")
+        self.run_agent(silent_env)
+        shutil.rmtree(vol)
+        self.run_agent(silent_env)
+
+        self.assertEqual(self.work_files(), [])
+        self.assertEqual(len(self.queue_files()), 1)
+        logs = self.helper_log_lines()
+        self.assertTrue(any(" waiting " in line and "no_drive" in line for line in logs), logs)
+
+        # In ask mode, canceling the label prompt still keeps the scan queued (exit 10).
+        ask_cancel_env = self.helper_env(
+            self.write_config("ask"), serial="SN-NEW-DRIVE-1", label_exit=1
+        )
+        self.run_agent(ask_cancel_env)
+        self.assertEqual(len(self.queue_files()), 1)
+        self.assertEqual(self.read_lines(self.dialog_log), ["label UNKNOWN_SERIAL_VOL"])
+
+        # Once the Drive is added, the next agent wake sends the queued scan and empties queue/.
+        drive_id = self.api.add_drive(label="Newly Added Drive", serial="SN-NEW-DRIVE-1")
+        self.run_agent(silent_env)
+        self.assertEqual(self.queue_files(), [])
+        snaps = self.api.read(
+            "drive_catalog_snapshots", DriveCatalogSnapshotsInput, drive=drive_id
+        )["snapshots"]
+        self.assertEqual(len(snaps), 1)
+        logs = self.helper_log_lines()
+        self.assertTrue(
+            any(" sent " in line and "UNKNOWN_SERIAL_VOL" in line for line in logs), logs
+        )
+
+    def test_agent_too_large_scan_is_logged_never_queued_and_never_sent(self) -> None:
+        drive_id = self.api.add_drive(label="Too Large Drive", serial="SN-TOO-LARGE")
+        cfg = self.write_config("silent")
+        env = self.helper_env(cfg, serial="SN-TOO-LARGE", max_bytes=100)
+
+        vol = self.make_volume("BIG_VOL")
+        self.run_agent(env)
+
+        # Direct send also rejects over T6_HELPER_MAX_BYTES with exit 13.
+        work_scan = self.state_dir / "work" / "BIG_VOL.json"
+        self.assertTrue(work_scan.is_file())
+        direct_send = subprocess.run(
+            [str(HELPER_DIR / "t6-drive-send"), str(work_scan)],
+            env=env,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(direct_send.returncode, 13, direct_send.stderr)
+
+        shutil.rmtree(vol)
+        self.run_agent(env)
+
+        self.assertEqual(self.work_files(), [])
+        self.assertEqual(self.queue_files(), [])
+        self.assertEqual(
+            self.api.read("drive_catalog_snapshots", DriveCatalogSnapshotsInput, drive=drive_id)[
+                "snapshots"
+            ],
+            [],
+        )
+        logs = self.helper_log_lines()
+        self.assertTrue(any(" too_large " in line and "BIG_VOL" in line for line in logs), logs)
+        self.assertFalse(any(" sent " in line for line in logs), logs)
+
+    def test_agent_older_scan_refused_is_logged_and_dropped_from_queue(self) -> None:
+        drive_id = self.api.add_drive(label="Order Refusal Drive", serial="SN-ORDER-1")
+        self.api.scan(
+            drive_id,
+            "2099-01-01T12:00:00+08:00",
+            [{"path": "future.txt", "kind": "file", "size_bytes": 1}],
+            root_path="ORDER_VOL",
+        )
+
+        cfg = self.write_config("silent")
+        env = self.helper_env(cfg, serial="SN-ORDER-1")
+        vol = self.make_volume("ORDER_VOL")
+        self.run_agent(env)
+        shutil.rmtree(vol)
+        self.run_agent(env)
+
+        self.assertEqual(self.work_files(), [])
+        self.assertEqual(self.queue_files(), [])
+        snaps = self.api.read(
+            "drive_catalog_snapshots", DriveCatalogSnapshotsInput, drive=drive_id
+        )["snapshots"]
+        self.assertEqual(len(snaps), 1)
+        logs = self.helper_log_lines()
+        self.assertTrue(any(" refused " in line and "never" in line for line in logs), logs)
 
 
 if __name__ == "__main__":

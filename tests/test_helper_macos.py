@@ -12,13 +12,18 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+REPO_ROOT = Path(__file__).resolve().parents[1]
+TESTS_DIR = Path(__file__).resolve().parent
+for _p in (str(REPO_ROOT), str(TESTS_DIR)):
+    if _p not in sys.path:
+        sys.path.insert(0, _p)
+
 from support import DriveAppCase
 from t6.verbs import DriveCatalogAtInput, DriveCatalogSnapshotsInput
 from werkzeug.serving import WSGIRequestHandler, make_server
 
 from app import create_app
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
 HELPER_DIR = REPO_ROOT / "helper"
 TOKEN = "synthetic-macos-helper-token-0123456789"
 FORBIDDEN_PYTHON_RE = re.compile(r"\bpython(?:3(?:\.\d+)?)?\b", re.IGNORECASE)

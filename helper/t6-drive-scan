@@ -1,0 +1,229 @@
+#!/bin/zsh
+set -euo pipefail
+
+if [[ "${T6_SCAN_NICED:-}" != "1" ]]; then
+  export T6_SCAN_NICED=1
+  script_self="$0"
+  if [[ "$script_self" != */* ]]; then
+    script_self=$(command -v -- "$script_self" 2>/dev/null || print -r -- "$script_self")
+  fi
+  if [[ -x "$script_self" ]]; then
+    exec nice -n 10 "$script_self" "$@"
+  fi
+  exec nice -n 10 /bin/zsh "$script_self" "$@"
+fi
+
+if [[ $# -ne 1 || -z "$1" ]]; then
+  print -u2 "Usage: t6-drive-scan <volume_path>"
+  exit 2
+fi
+
+volume_path="$1"
+while [[ "$volume_path" != "/" && "$volume_path" == */ ]]; do
+  volume_path="${volume_path%/}"
+done
+
+if [[ ! -d "$volume_path" ]]; then
+  print -u2 "t6-drive-scan: not a directory: $volume_path"
+  exit 1
+fi
+
+volume_name="${volume_path:t}"
+[[ -z "$volume_name" ]] && volume_name="/"
+
+work_dir=$(mktemp -d "${TMPDIR:-/tmp}/t6-scan.XXXXXX")
+trap 'rm -rf "$work_dir"' EXIT
+
+trim_ws() {
+  local s="$1"
+  while [[ "$s" == [[:space:]]* ]]; do s="${s#[[:space:]]}"; done
+  while [[ "$s" == *[[:space:]] ]]; do s="${s%[[:space:]]}"; done
+  print -r -- "$s"
+}
+
+read_default_serial() {
+  local vol="$1"
+  command -v diskutil >/dev/null 2>&1 || return 0
+  command -v system_profiler >/dev/null 2>&1 || return 0
+
+  local info whole="" dev="" line key val
+  info=$(diskutil info "$vol" 2>/dev/null) || return 0
+  while IFS= read -r line; do
+    if [[ "$line" == *:* ]]; then
+      key=$(trim_ws "${line%%:*}")
+      val=$(trim_ws "${line#*:}")
+      case "$key" in
+        ("Part of Whole") whole="$val" ;;
+        ("Device Identifier") dev="$val" ;;
+      esac
+    fi
+  done <<< "$info"
+
+  [[ -z "$whole" ]] && whole="$dev"
+  [[ -z "$whole" && -z "$dev" ]] && return 0
+
+  local sp_json="$work_dir/sp.json"
+  local sp_js="$work_dir/serial.js"
+  if system_profiler SPUSBDataType SPSerialATADataType SPNVMeDataType -json > "$sp_json" 2>/dev/null; then
+    cat <<'JXA' > "$sp_js"
+ObjC.import("Foundation");
+
+function run(argv) {
+  var path = argv[0];
+  var whole = argv[1];
+  var dev = argv[2];
+  var vol = argv[3];
+  var raw = $.NSString.stringWithContentsOfFileEncodingError(
+    path,
+    $.NSUTF8StringEncoding,
+    null
+  );
+  if (!raw) return "";
+  var data = JSON.parse(ObjC.unwrap(raw));
+
+  function findSerial(node) {
+    if (!node || typeof node !== "object") return "";
+    if (Array.isArray(node)) {
+      for (var i = 0; i < node.length; i++) {
+        var hit = findSerial(node[i]);
+        if (hit) return hit;
+      }
+      return "";
+    }
+    var bsd = node.bsd_name || "";
+    var vols = Array.isArray(node.volumes) ? node.volumes : [];
+    var matched = (whole && bsd === whole) || (dev && bsd === dev);
+    if (!matched) {
+      for (var j = 0; j < vols.length; j++) {
+        if ((vol && vols[j].mount_point === vol) || (dev && vols[j].bsd_name === dev)) {
+          matched = true;
+          break;
+        }
+      }
+    }
+    if (matched && typeof node.serial_num === "string" && node.serial_num.trim()) {
+      return node.serial_num.trim();
+    }
+    var keys = Object.keys(node);
+    for (var k = 0; k < keys.length; k++) {
+      var child = findSerial(node[keys[k]]);
+      if (child) return child;
+    }
+    return "";
+  }
+
+  return findSerial(data);
+}
+JXA
+    osascript -l JavaScript "$sp_js" "$sp_json" "$whole" "$dev" "$vol" 2>/dev/null || true
+  fi
+}
+
+serial=""
+if [[ -n "${T6_HELPER_SERIAL_CMD:-}" ]]; then
+  if [[ -x "$T6_HELPER_SERIAL_CMD" ]]; then
+    serial=$("$T6_HELPER_SERIAL_CMD" "$volume_path" 2>/dev/null || true)
+  else
+    serial=$(eval "$T6_HELPER_SERIAL_CMD \"\$volume_path\"" 2>/dev/null || true)
+  fi
+else
+  serial=$(read_default_serial "$volume_path" || true)
+fi
+serial=$(trim_ws "${serial//$'\r'/}")
+
+stat_file="$work_dir/stat.tsv"
+scan_js="$work_dir/scan.js"
+captured_on=$(date +"%Y-%m-%dT%H:%M:%S%z")
+
+(
+  cd "$volume_path"
+  find . -mindepth 1 \( \
+    \( -path './.*' ! -path './*/*' \) -o \
+    -name '.Spotlight-V100' -o \
+    -name '.Trashes' -o \
+    -name '.fseventsd' -o \
+    -name '.DocumentRevisions-V100' \
+  \) -prune -o \( -type f -o -type d \) -exec stat -t '%Y-%m-%dT%H:%M:%S%z' -f '%Sp	%z	%Sm	%N' {} +
+) > "$stat_file"
+
+cat <<'JXA' > "$scan_js"
+ObjC.import("Foundation");
+
+function formatOffsetIso(ts) {
+  return ts.replace(/([+-]\d{2})(\d{2})$/, "$1:$2");
+}
+
+function run(argv) {
+  var statPath = argv[0];
+  var volumeName = argv[1];
+  var serial = (argv[2] || "").trim();
+  var capturedOn = formatOffsetIso(argv[3]);
+
+  var nsRaw = $.NSString.stringWithContentsOfFileEncodingError(
+    statPath,
+    $.NSUTF8StringEncoding,
+    null
+  );
+  var raw = nsRaw ? ObjC.unwrap(nsRaw) : "";
+  var entries = [];
+  var lines = raw.split(/\r?\n/);
+
+  for (var i = 0; i < lines.length; i++) {
+    var line = lines[i];
+    if (!line) continue;
+
+    var t1 = line.indexOf("\t");
+    var t2 = t1 >= 0 ? line.indexOf("\t", t1 + 1) : -1;
+    var t3 = t2 >= 0 ? line.indexOf("\t", t2 + 1) : -1;
+    if (t1 < 0 || t2 < 0 || t3 < 0) continue;
+
+    var mode = line.slice(0, t1);
+    var sizeStr = line.slice(t1 + 1, t2);
+    var mtimeRaw = line.slice(t2 + 1, t3);
+    var relPath = line.slice(t3 + 1);
+
+    if (relPath.indexOf("./") === 0) {
+      relPath = relPath.slice(2);
+    }
+    if (!relPath || relPath === ".") continue;
+
+    var kind;
+    if (mode.charAt(0) === "d") {
+      kind = "dir";
+    } else if (mode.charAt(0) === "-") {
+      kind = "file";
+    } else {
+      continue;
+    }
+
+    var entry = {
+      path: relPath,
+      kind: kind
+    };
+    if (kind === "file") {
+      entry.size_bytes = parseInt(sizeStr, 10);
+    }
+    if (mtimeRaw) {
+      entry.mtime = formatOffsetIso(mtimeRaw);
+    }
+    entries.push(entry);
+  }
+
+  entries.sort(function (a, b) {
+    if (a.path < b.path) return -1;
+    if (a.path > b.path) return 1;
+    return 0;
+  });
+
+  var doc = {
+    serial: serial,
+    volume_name: volumeName,
+    captured_on: capturedOn,
+    root_path: volumeName,
+    entries: entries
+  };
+  return JSON.stringify(doc);
+}
+JXA
+
+osascript -l JavaScript "$scan_js" "$stat_file" "$volume_name" "$serial" "$captured_on"

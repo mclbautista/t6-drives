@@ -20,3 +20,17 @@ jobs:
       - run: .venv/bin/ruff format --check app.py gateway.py forms.py outbox.py custody.py catalog.py shipments.py reload.py runtime.py glossary.py movement_photos.py tools tests
       - run: docker build --iidfile "$RUNNER_TEMP/drives-image.id" .
       - run: .venv/bin/python tools/container_smoke.py "$(cat "$RUNNER_TEMP/drives-image.id")"
+  macos-helper:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - run: uv venv --python 3.12
+      - run: uv pip install --python .venv/bin/python -r requirements.lock
+      - run: uv pip install --python .venv/bin/python -r requirements-dev.lock
+      - run: |
+          set -o pipefail
+          .venv/bin/python -m unittest tests/test_helper_macos.py -v 2>&1 | tee "$RUNNER_TEMP/macos-test.log"
+          ! grep -qi "skipped" "$RUNNER_TEMP/macos-test.log"
+          grep -qE "^OK$" "$RUNNER_TEMP/macos-test.log"
+

@@ -21,7 +21,7 @@ jobs:
       - run: docker build --iidfile "$RUNNER_TEMP/drives-image.id" .
       - run: .venv/bin/python tools/container_smoke.py "$(cat "$RUNNER_TEMP/drives-image.id")"
   macos-helper:
-    runs-on: macos-14
+    runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5

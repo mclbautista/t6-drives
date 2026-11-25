@@ -86,6 +86,10 @@ send_bin=$(find_bin "t6-drive-send") || {
   print -u2 "t6-drive-agent: t6-drive-send not found"
   exit 1
 }
+hubs_bin=$(find_bin "t6-drive-hubs" || true)
+if [[ -n "$hubs_bin" ]]; then
+  "$hubs_bin" >/dev/null 2>&1 || true
+fi
 
 log_event() {
   local event="$1"

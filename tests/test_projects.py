@@ -220,7 +220,7 @@ class ProjectSearchTests(DriveAppCase):
     def test_latest_movement_is_the_default_sort_newest_first_with_no_movement_last(self):
         self.build()
         # Alpha goes out on a recording post: a movement on 2026-11-20, newer than violet's 2026-11-03.
-        self.api.capture("OUT Invented Courier|SYN-ALPHA-0", day="2026-11-20")
+        self.api.capture("OUT\nSYN-ALPHA-0\nR: Invented Courier", day="2026-11-20")
         plain = lambda query: [n.removeprefix("Unresolved: ") for n in self.names(query)]
         self.assertEqual(
             plain(""), ["Synthetic alpha", "Synthetic violet", "Synthetic text project"]

@@ -23,29 +23,39 @@ def count(html: str, name: str) -> int:
 
 
 class TodoListTests(CorrectionCase):
+    def test_capture_approvals_live_in_inbox_and_exceptions_keeps_sheet_and_data_problems(self):
+        capture = self.api.waiting_capture("IN\nSynthetic waiting case")
+        self.api.import_exception(
+            workbook="synthetic.xlsx", sheet="Log", row=9, reason="bad row", detail="x"
+        )
+        html = self.text("/exceptions")
+        self.assertNotIn('data-group="photos"', html)
+        self.assertNotIn("Give a photo a Drive", html)
+        self.assertNotIn(f'data-capture="{capture}"', html)
+        self.assertIn("bad row", html)
+        self.assertIn(f'data-capture="{capture}"', self.text("/inbox"))
+
     def test_the_items_are_grouped_by_what_to_do_with_a_count_for_each_group(self):
         project = self.api.project("Synthetic todo project")
-        self.api.capture("OUT Invented Courier|SYN-NOWHERE", message=5)
-        self.api.capture("OUT Invented Courier|SYN-NOWHERE-2", message=6)
+        self.api.waiting_capture("OUT\nSYN-NOWHERE\nR: Invented Courier", message=5)
+        self.api.waiting_capture("OUT\nSYN-NOWHERE-2\nR: Invented Courier", message=6)
         self.released_drive()
         html = self.text("/exceptions")
-        self.assertEqual(count(html, "photos"), 2)
+        self.assertNotIn('data-group="photos"', html)
         self.assertEqual(count(html, "projects"), 1)
         self.assertEqual(count(html, "rows"), 0)
         self.assertEqual(count(html, "overdue"), html.count('data-item="overdue"'))
-        self.assertEqual(len(re.findall(r'data-item="photo"', group(html, "photos"))), 2)
         self.assertEqual(len(re.findall(r'data-item="project"', group(html, "projects"))), 1)
         self.assertIn(f'<option value="{project}"', group(html, "projects"))
         top = re.search(r'<ul class="todo-counts">.*?</ul>', html, re.DOTALL)
         assert top is not None
-        for words in ("2 photos to give a Drive", "1 movement without a Project"):
-            self.assertIn(words, top.group(0))
+        self.assertIn("1 movement without a Project", top.group(0))
+        self.assertNotIn("photos to give a Drive", top.group(0))
 
     def test_each_item_is_one_sentence_and_one_button(self):
-        self.api.capture("OUT Invented Courier|SYN-NOWHERE", message=5)
         self.released_drive()
         html = self.text("/exceptions")
-        for name, button in (("photos", "Give it a Drive"), ("projects", "Set Project")):
+        for name, button in (("projects", "Set Project"),):
             items = re.findall(r"<li[^>]*data-item=.*?</li>", group(html, name), re.DOTALL)
             self.assertEqual(len(items), 1, name)
             self.assertEqual(len(re.findall(r'<p class="todo-sentence">', items[0])), 1, name)
@@ -88,7 +98,7 @@ class TodoListTests(CorrectionCase):
         html = self.text("/exceptions")
         self.assertIn("Nothing to do.", html)
         self.assertNotIn("<form", html)
-        self.assertEqual(count(html, "photos"), 0)
+        self.assertNotIn('data-group="photos"', html)
 
 
 class MovementPhotoTests(CorrectionCase):

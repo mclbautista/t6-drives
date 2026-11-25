@@ -7,14 +7,6 @@
 
 {% if todo_total %}<ul class="todo-counts">{% for g in groups if g.count %}<li><a href="#g-{{ g.name }}">{{ g.count }} {{ g.summary }}</a></li>{% endfor %}</ul>{% else %}<p class="card empty empty-title">Nothing to do.</p>{% endif %}
 
-<section id="g-photos" data-group="photos" data-count="{{ captures|length }}">
-<h2>Give a photo a Drive <span class="count">{{ captures|length }}</span></h2>
-{% if captures %}<ul class="stack">{% for c in captures %}<li class="card" data-item="photo">
-<p class="todo-sentence">A photo posted {{ c.posted_at }} has no Drive.</p>
-{% include "_capture.html" %}
-<p class="small"><a class="btn" href="/captures/{{ c.capture }}/drive">Give it a Drive</a></p></li>{% endfor %}</ul>{% else %}<div class="card empty"><p class="empty-title">Nothing to do.</p></div>{% endif %}
-</section>
-
 <section id="g-projects" data-group="projects" data-count="{{ needs_project|length }}">
 <h2>Pick a Project <span class="count">{{ needs_project|length }}</span></h2>
 {% if needs_project %}<ul class="stack">{% for m in needs_project %}<li class="card" data-item="project" data-movement="{{ m.id }}">

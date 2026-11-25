@@ -29,6 +29,7 @@ Check: open it from another office machine, which works; a request whose `Host` 
 
 | Screen | t6 verb |
 | --- | --- |
+| `/inbox` | `drive inbox` (waiting Items, newest first), `drive get` (guess labels), `drive approve` (guess, typed Drive, New drive, Not a drive, None). Settled Items disappear; None keeps an Item waiting. Core updates its custodian DM after approval. |
 | `/` search and filters, with each Drive's open Project use | `drive list` |
 | `/projects` | `drive projects` (API counts, including text-only Projects), `project list` (Project codes). Search by name or code (`q`), filters has drives out (`out=1`) and Registered or Name only, not linked to a Project yet (`kind`), sorts latest movement (default, newest first, Projects with no movement last), A to Z, most drives out, most drives in total (`sort`). |
 | `/projects/view?project=<id or text>` | `drive list`, `movement list` |
@@ -47,8 +48,8 @@ Check: open it from another office machine, which works; a request whose `Host` 
 | `/shipments`, `/shipments/<id>` | `drive shipments`, `drive shipment` (the manifest shows the facts stored at release) |
 | `/movements/<id>/correct` | `movement list`, `movement correct` (a correction is a new entry; the original stays in the log, with a link each way) |
 | `/drive/<id>/place` | `drive edit` (place TABLE, CABINET, SHELF, BOX or none, and T6 ownership; the search line shows both) |
-| `/exceptions` | a to-do list in four groups (give a photo a Drive, pick a Project, fix a row in the sheet, overdue T6 drives), each item one sentence and one button, with counts at the top: `drive capture list` (unresolved captures with text and photo), `drive capture photo`, `drive capture` with a Drive, `movement list` (needs a Project) and `movement correct` (set it), `drive overdue`, `drive reload report` (unmapped Project names), `drive exceptions` (rows the reload could not load) |
-| `/captures/<id>/photo`, `/captures/<id>/drive` | `drive capture photo`, `drive list` and `drive capture` (pick a Drive for an unresolved capture) |
+| `/exceptions` | Sheet and data problems in three groups (pick a Project, fix a row in the sheet, overdue T6 drives), each item one sentence and one button, with counts at the top: `movement list` (needs a Project), `movement correct` (set it), `drive overdue`, `drive reload report` (unmapped Project names), `drive exceptions` (rows the reload could not load). Capture approvals live in Inbox. |
+| `/captures/<id>/photo` | `drive capture photo` (kept photo, read for each request) |
 | `/movements/<id>`, `/movements/<id>/photo`, `/movements/<id>/photo/delete` | `movement list`, `movement photo-get`, `movement photo-add` (add or replace), `movement photo-delete` (the API lets only the drive custodian or an operator delete) |
 | Movement photos | a movement recorded from TRANSMITTAL shows its capture photo as a thumbnail that opens it (`drive capture photo`) |
 | `/exceptions/reload` | `drive reload` (a summary of what is loaded now, then a confirm; refused in plain words once the system is live) |
@@ -70,15 +71,15 @@ uv pip install --python .venv/bin/python -r requirements-dev.lock
 .venv/bin/python -m build
 ```
 
-The tests serve t6's real `VerbAPI` on a temporary database (`tests/support.py`); nothing is faked. The API side needs `httpx`, `PyYAML` and `openpyxl`, which are development dependencies only. If Chromium is installed elsewhere, set `DRIVES_CHROMIUM` to its path.
+The page tests use a synthetic HTTP API (`tests/support.py`), backed by t6's real `VerbAPI` on a temporary database, with scripted HTTP answers for cases such as exact guesses. The API side needs `httpx`, `PyYAML` and `openpyxl`, which are development dependencies only. If Chromium is installed elsewhere, set `DRIVES_CHROMIUM` to its path.
 
-t6 is pinned to release tag `v0.6.25`; `requirements.lock` pins the exact commit.
+t6 is pinned to core main commit `9b1d673668e164dab3fd36834fe28ec6892f957b` in the dependency files.
 
 A scan manifest of about 8,000 files is 1 to 2 MB, so only `POST /drive/<id>/catalog` accepts a body up to 12 MB (every other form stays at 64 KB, and the Host, Origin and CSRF checks run first). A scan the API cannot take is not queued, because the Outbox page would print the whole manifest; the page says the API is unavailable, and uploading again is the same write. The app waits up to 60 seconds for the API to save a scan. The t6 API accepts that large request on its tailnet listener only.
 
 A refusal for a step that cannot follow the last custody step (rule `custody`), or for an edit of a Drive that changed (`drive_changed`), is answered 409 and shown to the person; it is never queued or sent again.
 
-The main navigation is Search, Projects, Movements, Exceptions and Waiting to send. Recording happens in
+The main navigation is Inbox, Search, Projects, Movements, Exceptions and Waiting to send. Recording happens in
 TRANSMITTAL; the legacy custody and release URLs remain available directly. Projects and Movements
 pages show API reads, with movement logs newest first. Retire remains linked from each Drive.
 Every rendered page uses the API's practice flag for its practice banner; no flag is guessed when

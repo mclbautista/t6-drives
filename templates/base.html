@@ -13,6 +13,7 @@
 <div class="wrap bar">
 <a class="brand" href="/">Drives</a>
 <nav aria-label="Main">
+<a href="/inbox"{% if path == "/inbox" %} aria-current="page"{% endif %}>Inbox</a>
 <a href="/"{% if path == "/" or path == "/new" or path.startswith("/drive/") %} aria-current="page"{% endif %}>Search</a>
 <a href="/projects"{% if path.startswith("/projects") %} aria-current="page"{% endif %}>Projects</a>
 <a href="/movements"{% if path.startswith("/movements") %} aria-current="page"{% endif %}>Movements</a>

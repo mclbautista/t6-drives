@@ -16,6 +16,7 @@ from t6.verbs import (
     ContactCreateInput,
     Done,
     DriveAddInput,
+    DriveApproveInput,
     DriveAssignInput,
     DriveCaptureInput,
     DriveCatalogSnapshotInput,
@@ -45,6 +46,7 @@ PROJECT_SECONDS = 300.0
 WRITES: dict[str, type[BaseModel]] = {
     "contact_create": ContactCreateInput,
     "drive_add": DriveAddInput,
+    "drive_approve": DriveApproveInput,
     "drive_edit": DriveEditInput,
     "drive_promote_serial": DrivePromoteSerialInput,
     "drive_assign": DriveAssignInput,

@@ -1,6 +1,7 @@
 """The real t6 API on a temporary database, served over HTTP for the app under test.
 
-The API code is t6's own `VerbAPI`; nothing is faked. A custodian Person holds the one API secret the app
+The API code defaults to t6's own `VerbAPI`; a test can script an HTTP answer at the page seam.
+A custodian Person holds the one API secret the app
 uses. Drives, custody events and Assignments are seeded only by calling verbs through `t6.client.Client`;
 Projects are registered in the t6 registry with a Notion page from t6's own Notion fake.
 """
@@ -47,6 +48,8 @@ class SyntheticAPI:
     def __init__(self, directory: str) -> None:
         self.mode = "up"
         self.requests: list[str] = []
+        # Scripted HTTP answers for page cases such as an exact-match shortlist. Other calls use core.
+        self.answers: dict[str, dict[str, Any]] = {}
         self.notion = FakeNotion()
         self.notion.add_snapshot_data_source("projects", "projects")
         self.notion.add_snapshot_data_source("contacts", "contacts")
@@ -93,6 +96,8 @@ class SyntheticAPI:
         self.requests.append(request.path)
         if self.mode == "down":
             return Response(503, {"error": "unavailable"})
+        if request.path in self.answers:
+            return Response(200, self.answers[request.path])
         response = self.api(request)
         # The write is confirmed and done, and then the answer to the confirm is lost on the way back.
         lost = self.mode == "lost" and b'"confirm"' in request.body
@@ -189,11 +194,24 @@ class SyntheticAPI:
         SqliteDriveStore(self.registry).record_exceptions([ReviewItem(**fields)])
 
     def capture(self, text: str, message: int = 1, day: str = "2026-11-02") -> str:
-        """A recording post as the Telegram gateway admits it, then resolved by t6's own resolver.
+        """A recorded movement fixture: resolve the post, then approve its named Drives through core."""
+        from t6.verbs import DriveApproveInput, DriveInboxInput
 
-        No photo reader is configured, so the resolver goes by the text alone; a post it cannot
-        match to a Drive becomes an exception.
-        """
+        capture = self.waiting_capture(text, message, day)
+        items = self.read("drive_inbox", DriveInboxInput)["items"]
+        waiting = [item for item in items if item["capture"] == capture]
+        assert waiting, "Movement fixture needs a valid caption with a named Drive"
+        for item in waiting:
+            done = self.client().drive_approve(
+                DriveApproveInput(
+                    capture=capture, item=item["item"], choice="drive", typed=item["text"]
+                )
+            )
+            assert isinstance(done, Done), done
+        return capture
+
+    def waiting_capture(self, text: str, message: int = 1, day: str = "2026-11-02") -> str:
+        """A synthetic recording post resolved with no guesses, leaving valid Items in the Inbox."""
         from t6.drives.capture import capture_post
         from t6.verbs import DriveCaptureInput
 
@@ -214,13 +232,13 @@ class SyntheticAPI:
         return capture
 
     def resolve_capture(self, capture: str, revision: int = 0) -> None:
-        """What t6's worker does with a queued capture; the photo reader answers that it sees no Drive."""
+        """What t6's worker does with a queued capture; the photo matcher returns no guesses."""
         from t6.drives.capture import CaptureResolver
         from t6.llm.testing import FakeProvider
         from t6.worker.client import WorkerJob
 
         provider = FakeProvider()
-        provider.reply('{"drives": []}')
+        provider.reply('{"guesses": [], "label_text": null}')
         payload: dict[str, Any] = {"capture": capture}
         if revision:
             payload["revision"] = revision

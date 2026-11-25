@@ -4,14 +4,14 @@ import unittest
 
 from support import DriveAppCase
 
-NAV = ("Search", "Projects", "Movements", "Exceptions", "Waiting to send")
+NAV = ("Inbox", "Search", "Projects", "Movements", "Exceptions", "Waiting to send")
 
 
 class DesignTests(DriveAppCase):
     def test_every_page_has_the_shell_the_viewport_the_stylesheet_and_the_nav(self):
         drive = self.api.add_drive(label="Synthetic design drive", serial="SYN-D")
         urls = ["/", "/new", f"/drive/{drive}", f"/drive/{drive}/edit", f"/drive/{drive}/custody"]
-        for url in [*urls, "/shipments", "/shipments/new", "/exceptions", "/outbox"]:
+        for url in [*urls, "/inbox", "/shipments", "/shipments/new", "/exceptions", "/outbox"]:
             response = self.web.get(url)
             html = response.get_data(as_text=True)
             self.assertEqual(response.status_code, 200, url)
@@ -24,6 +24,11 @@ class DesignTests(DriveAppCase):
 
     def test_the_current_page_is_marked_in_the_nav(self):
         self.assertIn('<a href="/outbox" aria-current="page">', self.text("/outbox"))
+
+    def test_inbox_is_first_in_the_navigation_and_marks_the_current_page(self):
+        html = self.text("/inbox")
+        nav = html.split('<nav aria-label="Main">', 1)[1].split("</nav>", 1)[0]
+        self.assertTrue(nav.strip().startswith('<a href="/inbox" aria-current="page">Inbox</a>'))
 
     def test_notice_queued_and_unavailable_pages_keep_their_roles_and_the_shell(self):
         drive = self.api.add_drive(label="Synthetic")

@@ -1,0 +1,212 @@
+#!/bin/zsh
+set -euo pipefail
+
+log_dir="${T6_HELPER_LOG_DIR:-$HOME/Library/Logs/t6-drives-helper}"
+hubs_log="$log_dir/hubs.log"
+
+mkdir -p "$log_dir"
+
+work_dir=$(mktemp -d "${TMPDIR:-/tmp}/t6-hubs.XXXXXX")
+tmp_log="$log_dir/.tmp.hubs.log.$$"
+cleanup() {
+  rm -rf "$work_dir" "$tmp_log"
+}
+trap cleanup EXIT INT TERM
+
+usb_json="$work_dir/usb.json"
+if [[ -n "${T6_HELPER_USB_CMD:-}" ]]; then
+  if [[ -x "$T6_HELPER_USB_CMD" ]]; then
+    "$T6_HELPER_USB_CMD" > "$usb_json" || exit 1
+  else
+    eval "$T6_HELPER_USB_CMD" > "$usb_json" || exit 1
+  fi
+else
+  system_profiler SPUSBDataType -json > "$usb_json" || exit 1
+fi
+
+if [[ ! -s "$usb_json" ]]; then
+  print -u2 "t6-drive-hubs: empty USB tree output"
+  exit 1
+fi
+
+now_iso="${T6_HELPER_NOW_ISO:-$(date +"%Y-%m-%dT%H:%M:%S%z")}"
+
+hubs_js="$work_dir/hubs.js"
+cat <<'JXA' > "$hubs_js"
+ObjC.import("Foundation");
+
+function formatOffsetIso(ts) {
+  return String(ts || "").replace(/([+-]\d{2})(\d{2})$/, "$1:$2");
+}
+
+function cleanField(val) {
+  if (val == null) return "";
+  return String(val).replace(/[\r\n\t]+/g, " ").trim();
+}
+
+function firstNonEmpty() {
+  for (var i = 0; i < arguments.length; i++) {
+    var s = cleanField(arguments[i]);
+    if (s) return s;
+  }
+  return "";
+}
+
+function hasHubWord(val) {
+  var s = cleanField(val).toLowerCase();
+  return s.indexOf("hub") !== -1;
+}
+
+function hasVendorOrProduct(node) {
+  return Boolean(
+    cleanField(node.manufacturer) ||
+    cleanField(node.vendor_id) ||
+    cleanField(node.product_id) ||
+    cleanField(node.product_name)
+  );
+}
+
+function isHubNode(node) {
+  if (Array.isArray(node._items)) {
+    return true;
+  }
+  if (hasHubWord(node._name) || hasHubWord(node.product_name)) {
+    return true;
+  }
+  return false;
+}
+
+function readFileUtf8(filePath) {
+  var nsRaw = $.NSString.stringWithContentsOfFileEncodingError(
+    filePath,
+    $.NSUTF8StringEncoding,
+    null
+  );
+  if (!nsRaw) return null;
+  return ObjC.unwrap(nsRaw);
+}
+
+function run(argv) {
+  var usbPath = argv[0];
+  var hubsLogPath = argv[1];
+  var tmpLogPath = argv[2];
+  var nowIso = formatOffsetIso(argv[3]);
+
+  var rawUsb = readFileUtf8(usbPath);
+  if (!rawUsb) {
+    throw new Error("Could not read USB tree JSON.");
+  }
+  var parsed = JSON.parse(rawUsb);
+  var buses;
+  if (parsed && Array.isArray(parsed.SPUSBDataType)) {
+    buses = parsed.SPUSBDataType;
+  } else if (Array.isArray(parsed)) {
+    buses = parsed;
+  } else {
+    throw new Error("Unexpected USB tree JSON structure.");
+  }
+
+  var seenInRun = {};
+  var detected = [];
+
+  function recordHub(node) {
+    var vendor = firstNonEmpty(node.manufacturer, node.vendor_id) || "-";
+    var model = firstNonEmpty(node._name, node.product_name, node.product_id) || "-";
+    var serial = cleanField(node.serial_num) || "-";
+    var key = vendor + "\t" + model + "\t" + serial;
+    if (seenInRun[key]) return;
+    seenInRun[key] = true;
+    detected.push({
+      key: key,
+      vendor: vendor,
+      model: model,
+      serial: serial
+    });
+  }
+
+  function walkItems(items) {
+    if (!Array.isArray(items)) return;
+    for (var i = 0; i < items.length; i++) {
+      var node = items[i];
+      if (!node || typeof node !== "object") continue;
+      if (isHubNode(node)) {
+        recordHub(node);
+      }
+      if (Array.isArray(node._items)) {
+        walkItems(node._items);
+      }
+    }
+  }
+
+  for (var b = 0; b < buses.length; b++) {
+    var bus = buses[b];
+    if (!bus || typeof bus !== "object") continue;
+    if (hasVendorOrProduct(bus) && isHubNode(bus)) {
+      recordHub(bus);
+    }
+    if (Array.isArray(bus._items)) {
+      walkItems(bus._items);
+    }
+  }
+
+  var rows = [];
+  var rowIndexByKey = {};
+  if ($.NSFileManager.defaultManager.fileExistsAtPath(hubsLogPath)) {
+    var existingRaw = readFileUtf8(hubsLogPath);
+    if (existingRaw == null) {
+      throw new Error("Could not read existing hubs.log.");
+    }
+    var lines = existingRaw.split(/\r?\n/);
+    for (var li = 0; li < lines.length; li++) {
+      var line = lines[li];
+      if (!line) continue;
+      var parts = line.split("\t");
+      if (parts.length < 5) continue;
+      var row = {
+        vendor: parts[0],
+        model: parts[1],
+        serial: parts[2],
+        first_seen: parts[3],
+        last_seen: parts[4]
+      };
+      var rowKey = row.vendor + "\t" + row.model + "\t" + row.serial;
+      if (rowIndexByKey[rowKey] === undefined) {
+        rowIndexByKey[rowKey] = rows.length;
+        rows.push(row);
+      }
+    }
+  }
+
+  for (var di = 0; di < detected.length; di++) {
+    var hub = detected[di];
+    var idx = rowIndexByKey[hub.key];
+    if (idx !== undefined) {
+      rows[idx].last_seen = nowIso;
+    } else {
+      rowIndexByKey[hub.key] = rows.length;
+      rows.push({
+        vendor: hub.vendor,
+        model: hub.model,
+        serial: hub.serial,
+        first_seen: nowIso,
+        last_seen: nowIso
+      });
+    }
+  }
+
+  var outLines = [];
+  for (var ri = 0; ri < rows.length; ri++) {
+    var r = rows[ri];
+    outLines.push([r.vendor, r.model, r.serial, r.first_seen, r.last_seen].join("\t"));
+  }
+  var outText = outLines.length > 0 ? outLines.join("\n") + "\n" : "";
+  var nsOut = $(outText);
+  if (!nsOut.writeToFileAtomicallyEncodingError(tmpLogPath, true, $.NSUTF8StringEncoding, null)) {
+    throw new Error("Could not write temporary hubs.log.");
+  }
+  return String(detected.length);
+}
+JXA
+
+osascript -l JavaScript "$hubs_js" "$usb_json" "$hubs_log" "$tmp_log" "$now_iso" >/dev/null
+mv -f "$tmp_log" "$hubs_log"

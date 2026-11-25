@@ -44,6 +44,7 @@ class HelperStaticTests(unittest.TestCase):
             "t6-drive-scan",
             "t6-drive-send",
             "t6-drive-agent",
+            "t6-drive-hubs",
             "build-scan-drive-app",
             "Scan Drive.applescript",
             "dev.t6.drives-helper.plist",
@@ -114,6 +115,14 @@ class HelperMacOSE2ETests(DriveAppCase):
             retry_interval=0,
             helper_token=TOKEN,
         )
+        self.app_requests: list[tuple[str, str]] = []
+
+        @self.app.before_request
+        def _record_app_request() -> None:
+            from flask import request
+
+            self.app_requests.append((request.method, request.path))
+
         self.server = make_server("127.0.0.1", 0, self.app, request_handler=QuietHandler)
         thread = threading.Thread(target=self.server.serve_forever, daemon=True)
         thread.start()
@@ -223,6 +232,7 @@ class HelperMacOSE2ETests(DriveAppCase):
         confirm_exit: int = 0,
         rescan_seconds: int | None = None,
         max_bytes: int | None = None,
+        usb_cmd: str | Path | None = None,
     ) -> dict[str, str]:
         env = dict(os.environ)
         env["PATH"] = f"{self.trap_bin}:{env.get('PATH', '')}"
@@ -242,6 +252,8 @@ class HelperMacOSE2ETests(DriveAppCase):
             env["T6_HELPER_RESCAN_SECONDS"] = str(rescan_seconds)
         if max_bytes is not None:
             env["T6_HELPER_MAX_BYTES"] = str(max_bytes)
+        if usb_cmd is not None:
+            env["T6_HELPER_USB_CMD"] = str(usb_cmd)
         return env
 
     def run_scan_and_send(
@@ -715,6 +727,125 @@ class HelperMacOSE2ETests(DriveAppCase):
         self.assertEqual(len(snaps), 1)
         logs = self.helper_log_lines()
         self.assertTrue(any(" refused " in line and "never" in line for line in logs), logs)
+
+    def test_agent_hub_log_records_updates_and_sends_nothing(self) -> None:
+        usb_json_path = self.work / "usb.json"
+        usb_stub = self.stubs / "usb.sh"
+        usb_stub.write_text(f'#!/bin/sh\ncat "{usb_json_path}"\n')
+        usb_stub.chmod(0o755)
+
+        usb_tree = {
+            "SPUSBDataType": [
+                {
+                    "_name": "USB31Bus",
+                    "host_controller": "AppleUSBXHCITR",
+                    "_items": [
+                        {
+                            "_name": "Anker 10-Port Hub",
+                            "manufacturer": "Anker",
+                            "product_id": "0x0610",
+                            "vendor_id": "0x291a",
+                            "serial_num": "ANKER-HUB-001",
+                            "_items": [
+                                {
+                                    "_name": "Extreme Portable SSD",
+                                    "manufacturer": "SanDisk",
+                                    "product_id": "0x55a5",
+                                    "vendor_id": "0x0781",
+                                    "serial_num": "DISK-SN-999",
+                                }
+                            ],
+                        },
+                        {
+                            "_name": "USB2.0 Hub",
+                            "vendor_id": "0x05e3",
+                            "product_id": "0x0610",
+                        },
+                        {
+                            "_name": "Standalone Flash Drive",
+                            "manufacturer": "Samsung",
+                            "vendor_id": "0x090c",
+                            "product_id": "0x1000",
+                            "serial_num": "FLASH-SN-1",
+                        },
+                    ],
+                }
+            ]
+        }
+        usb_json_path.write_text(json.dumps(usb_tree), encoding="utf-8")
+
+        cfg = self.write_config("silent")
+        env = self.helper_env(cfg, usb_cmd=usb_stub)
+
+        # Wake 1: records both hubs, ignores non-hub disks and host controller.
+        self.run_agent(env)
+        hubs_log = self.log_dir / "hubs.log"
+        lines1 = self.read_lines(hubs_log)
+        self.assertEqual(len(lines1), 2, lines1)
+        rows1 = [line.split("\t") for line in lines1]
+        for row in rows1:
+            self.assertEqual(len(row), 5, row)
+            self.assertEqual(row[3], row[4])
+            self.assertIsNotNone(datetime.fromisoformat(row[3]).utcoffset())
+        self.assertEqual(rows1[0][:3], ["Anker", "Anker 10-Port Hub", "ANKER-HUB-001"])
+        self.assertEqual(rows1[1][:3], ["0x05e3", "USB2.0 Hub", "-"])
+        raw_log1 = hubs_log.read_text(encoding="utf-8")
+        self.assertNotIn("Extreme Portable SSD", raw_log1)
+        self.assertNotIn("Standalone Flash Drive", raw_log1)
+        self.assertNotIn("USB31Bus", raw_log1)
+
+        # Wake 2: updates last_seen without duplicating or altering first_seen.
+        time.sleep(1.1)
+        self.run_agent(env)
+        lines2 = self.read_lines(hubs_log)
+        self.assertEqual(len(lines2), 2, lines2)
+        rows2 = [line.split("\t") for line in lines2]
+        for r1, r2 in zip(rows1, rows2, strict=True):
+            self.assertEqual(r2[:3], r1[:3])
+            self.assertEqual(r2[3], r1[3])
+            self.assertGreater(datetime.fromisoformat(r2[4]), datetime.fromisoformat(r1[4]))
+
+        # Wake 3: unplugged hub stays in hubs.log with preserved timestamps.
+        time.sleep(1.1)
+        usb_tree["SPUSBDataType"][0]["_items"] = [usb_tree["SPUSBDataType"][0]["_items"][0]]
+        usb_json_path.write_text(json.dumps(usb_tree), encoding="utf-8")
+        self.run_agent(env)
+        lines3 = self.read_lines(hubs_log)
+        self.assertEqual(len(lines3), 2, lines3)
+        rows3 = [line.split("\t") for line in lines3]
+        self.assertEqual(rows3[0][:4], rows2[0][:4])
+        self.assertGreater(datetime.fromisoformat(rows3[0][4]), datetime.fromisoformat(rows2[0][4]))
+        self.assertEqual(rows3[1], rows2[1])
+
+        # Zero HTTP requests were sent to the drives app or VerbAPI.
+        self.assertEqual(self.app_requests, [])
+        self.assertEqual(self.api.requests, [])
+
+    def test_agent_continues_when_usb_tree_fails_or_is_empty(self) -> None:
+        fail_usb = self.stubs / "usb-fail.sh"
+        fail_usb.write_text("#!/bin/sh\nexit 1\n")
+        fail_usb.chmod(0o755)
+
+        empty_usb = self.stubs / "usb-empty.sh"
+        empty_usb.write_text("#!/bin/sh\n")
+        empty_usb.chmod(0o755)
+
+        self.log_dir.mkdir(parents=True, exist_ok=True)
+        hubs_log = self.log_dir / "hubs.log"
+        preserved = "Anker\tAnker Hub\tSN-1\t2026-11-25T10:00:00+08:00\t2026-11-25T10:00:00+08:00\n"
+        hubs_log.write_text(preserved, encoding="utf-8")
+
+        vol = self.make_volume("USB_FAIL_VOL")
+        cfg = self.write_config("silent")
+
+        self.run_agent(self.helper_env(cfg, serial="SN-USB-FAIL", usb_cmd=fail_usb))
+        self.assertTrue((self.state_dir / "work" / f"{vol.name}.json").is_file())
+        self.assertEqual(hubs_log.read_text(encoding="utf-8"), preserved)
+
+        self.run_agent(self.helper_env(cfg, serial="SN-USB-FAIL", usb_cmd=empty_usb))
+        self.assertEqual(hubs_log.read_text(encoding="utf-8"), preserved)
+        self.assertEqual(self.app_requests, [])
+        self.assertEqual(self.api.requests, [])
 
 
 if __name__ == "__main__":

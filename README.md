@@ -32,7 +32,7 @@ Check: open it from another office machine, which works; a request whose `Host` 
 | `/inbox` | `drive inbox` (waiting Items, newest first), `drive get` (guess labels), `drive approve` (guess, typed Drive, New drive, Not a drive, None). Settled Items disappear; None keeps an Item waiting. Core updates its custodian DM after approval. |
 | `/` search and filters, with each Drive's open Project use | `drive list` |
 | `/projects` | `drive projects` (API counts, including text-only Projects), `project list` (Project codes). Search by name or code (`q`), filters has drives out (`out=1`) and Registered or Name only, not linked to a Project yet (`kind`), sorts latest movement (default, newest first, Projects with no movement last), A to Z, most drives out, most drives in total (`sort`). |
-| `/projects/view?project=<id or text>` | `drive list`, `movement list` |
+| `/projects/view?project=<id or text>` | `drive list`, `drive project-movements` (effective history, newest first, with the coordinator at the time and a To review mark), `person get` (people's names) |
 | `/movements` | `movement list` (Project, person, text and date-range filters) |
 | `/new` serial first | `drive list` (exact accepted serial), then `drive add` |
 | `/drive/<id>` | `drive get` |

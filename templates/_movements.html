@@ -3,13 +3,19 @@
 {% for m in movements %}
 <li class="card" id="m-{{ m.id }}" data-movement="{{ m.id }}">
 <div class="title-block"><strong>{{ m.on or 'Undated' }} · {{ m.direction }}</strong>
+{% if project_history and m.to_review %}<span class="chip chip--review">To review</span>{% endif %}
 {% if m.drive %}<a href="/drive/{{ m.drive }}">{{ m.label or "Drive without a label" }}</a>{% else %}<span>{{ m.label or 'Unknown label' }}</span><span class="chip chip--review">Unmatched</span>{% endif %}</div>
+{% if project_history %}
+<p>{{ 'Recipient' if m.direction == 'OUT' else 'Receiver' }}: {{ person_name(m.person) }}</p>
+<p>Coordinator at the time: {% for person in m.coordinators %}{{ person_name(person) }}{% if not loop.last %}, {% endif %}{% else %}Unknown{% endfor %}</p>
+{% else %}
 <p>{{ display(m.project) }} · Person: {{ m.person or 'Unknown' }} · Place: {{ m.place or 'Unknown' }}</p>
+{% endif %}
 {% include "_movement_photo.html" %}
 {% if m.description %}<p>{{ m.description }}</p>{% endif %}
 {% if m.remarks %}<p>{{ m.remarks }}</p>{% endif %}
 {% if m.photo == 'upload' %}<a href="/movements/{{ m.id }}"><img class="movement-thumb" src="/movements/{{ m.id }}/photo" alt="Photo of this movement" loading="lazy"></a>{% endif %}
-{% if m.corrects %}<p class="muted small"><a href="#m-{{ m.corrects }}">Correction of the earlier entry</a></p>{% endif %}
+{% if m.corrects %}<p class="muted small"><a href="{% if project_history %}/movements/{{ m.corrects }}{% else %}#m-{{ m.corrects }}{% endif %}">Correction of the earlier entry</a></p>{% endif %}
 {% if m.id in corrected_by %}<p class="muted small"><span class="chip">Corrected</span> <a href="#m-{{ corrected_by[m.id] }}">See the correction</a></p>{% else %}<p class="small"><a href="/movements/{{ m.id }}/correct">Correct this entry</a> · <a href="/movements/{{ m.id }}">{% if m.photo == 'upload' %}Photo{% else %}Add a photo{% endif %}</a></p>{% endif %}
 </li>
 {% else %}<li class="empty-note">No movements match.</li>{% endfor %}

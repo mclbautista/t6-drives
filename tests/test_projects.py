@@ -6,10 +6,15 @@ from urllib.parse import urlencode
 
 from openpyxl import Workbook  # type: ignore[import-untyped]
 from support import DriveAppCase
+from t6.notion.testing import relation, title
+from t6.registry import Registered
 from t6.verbs import (
     Done,
+    DriveProjectMovementsInput,
     DriveProjectsInput,
     DriveReloadInput,
+    MovementCorrectInput,
+    PersonGetInput,
     Preview,
 )
 
@@ -148,6 +153,165 @@ class ProjectTests(DriveAppCase):
                     self.assertIn("released", html)
                     self.assertIn("Synthetic missing", html)
                     self.assertLess(html.index("2026-11-03"), html.index("2026-11-01"))
+
+
+class ProjectMovementHistoryTests(DriveAppCase):
+    def setUp(self):
+        super().setUp()
+        self.project = self.api.project("Synthetic history project")
+        self.drive = self.api.add_drive(label="Synthetic history drive", serial="SYN-HISTORY")
+        self.api.assign(self.drive, self.project, "master", "master")
+        self.url = "/projects/view?" + urlencode({"project": self.project})
+
+    def person(self, name):
+        page = self.api.notion.add_page("contacts", {"Name": title(name)})
+        return self.api.people_write(
+            self.api.api.people, "add", {"page_id": page["id"], "kind": "staff"}, "setup"
+        )["person_id"]
+
+    def movement(self, number, **facts):
+        return {
+            "id": "t6m_" + str(number) * 32,
+            "drive": self.drive,
+            "label": "Synthetic history drive",
+            "on": "2026-11-25",
+            "direction": "OUT",
+            "person": "Invented Courier",
+            "recorder": None,
+            "place": None,
+            "project": {"page_id": self.project, "text": None},
+            "origin": None,
+            "capture": None,
+            "corrects": None,
+            "description": None,
+            "remarks": None,
+            "coordinators": [],
+            "to_review": False,
+            **facts,
+        }
+
+    def test_history_names_the_saved_coordinators_separately_from_recipient_and_receiver(self):
+        from test_plain_pages import visible
+
+        earlier = self.person("Invented Earlier Coordinator")
+        later = self.person("Invented Later Coordinator")
+        receiver = self.person("Invented Receiver")
+        self.api.answers["/v1/drive/project-movements"] = {
+            "outcome": "done",
+            "result": {
+                "movements": [
+                    self.movement(2, direction="IN", person=receiver, coordinators=[later]),
+                    self.movement(1, on="2026-11-20", coordinators=[earlier, later]),
+                ]
+            },
+        }
+        response = self.web.get(self.url)
+        self.assertEqual(response.status_code, 200)
+        text = visible(response.get_data(as_text=True))
+        self.assertIn("2026-11-25 · IN", text)
+        self.assertIn("Receiver: Invented Receiver", text)
+        self.assertIn("Coordinator at the time: Invented Later Coordinator", text)
+        self.assertIn("2026-11-20 · OUT", text)
+        self.assertIn("Recipient: Invented Courier", text)
+        self.assertIn(
+            "Coordinator at the time: Invented Earlier Coordinator, Invented Later Coordinator",
+            text,
+        )
+        self.assertIn("Synthetic history drive", text)
+        self.assertLess(text.index("2026-11-25"), text.index("2026-11-20"))
+        for identity in (earlier, later, receiver, self.project, self.drive):
+            self.assertNotIn(identity, text)
+
+    def test_only_movements_waiting_for_review_are_marked(self):
+        self.api.answers["/v1/drive/project-movements"] = {
+            "outcome": "done",
+            "result": {
+                "movements": [
+                    self.movement(2, to_review=True),
+                    self.movement(1, on="2026-11-20"),
+                ]
+            },
+        }
+        html = self.text(self.url)
+        rows = re.findall(r'<li class="card"[^>]*data-movement="[^"]+">(.*?)</li>', html, re.DOTALL)
+        self.assertEqual(len(rows), 2)
+        self.assertIn('class="chip chip--review">To review</span>', rows[0])
+        self.assertNotIn("To review", rows[1])
+
+    def test_missing_people_show_unknown_without_printing_their_ids(self):
+        from test_plain_pages import visible
+
+        missing = "t6n_" + "0" * 32
+        self.api.answers["/v1/drive/project-movements"] = {
+            "outcome": "done",
+            "result": {
+                "movements": [
+                    self.movement(2, direction="IN", person=missing, coordinators=[missing]),
+                    self.movement(1, on=None, person=None),
+                ]
+            },
+        }
+        response = self.web.get(self.url)
+        self.assertEqual(response.status_code, 200)
+        text = visible(response.get_data(as_text=True))
+        self.assertIn("Receiver: Unknown", text)
+        self.assertIn("Recipient: Unknown", text)
+        self.assertEqual(text.count("Coordinator at the time: Unknown"), 2)
+        self.assertIn("Undated · OUT", text)
+        self.assertNotIn(missing, text)
+
+    def test_captured_history_keeps_the_coordinator_after_the_project_changes(self):
+        earlier = self.person("Invented Earlier Coordinator")
+        later = self.person("Invented Later Coordinator")
+        earlier_page = self.api.read("person_get", PersonGetInput, person_id=earlier)["person"][
+            "page_id"
+        ]
+        later_page = self.api.read("person_get", PersonGetInput, person_id=later)["person"][
+            "page_id"
+        ]
+        page = self.api.notion.add_page(
+            "projects",
+            {
+                "Name": title("Synthetic snapshot project"),
+                "T6 Post Coordinator": relation(earlier_page),
+            },
+        )
+        registered = self.api.registry.register(
+            actor="setup", idempotency_key="snapshot-project", notion_page_id=page["id"]
+        )
+        assert isinstance(registered, Registered)
+        project = registered.project.id
+        drive = self.api.add_drive(label="Synthetic snapshot drive", serial="SYN-SNAPSHOT")
+        self.api.assign(drive, project, "master", "master")
+        self.api.capture("OUT\nSYN-SNAPSHOT\nR: Invented Courier", day="2026-11-20")
+        self.api.notion.update_page(page["id"], {"T6 Post Coordinator": relation(later_page)})
+        self.api.capture("IN\nSYN-SNAPSHOT", message=2, day="2026-11-25")
+        html = self.text("/projects/view?" + urlencode({"project": project}))
+        rows = re.findall(r'<li class="card"[^>]*data-movement="[^"]+">(.*?)</li>', html, re.DOTALL)
+        self.assertEqual(len(rows), 2)
+        self.assertIn("2026-11-25 · IN", rows[0])
+        self.assertIn("Coordinator at the time: Invented Later Coordinator", rows[0])
+        self.assertNotIn("Invented Earlier Coordinator", rows[0])
+        self.assertIn("2026-11-20 · OUT", rows[1])
+        self.assertIn("Coordinator at the time: Invented Earlier Coordinator", rows[1])
+        self.assertNotIn("Invented Later Coordinator", rows[1])
+
+    def test_history_shows_only_the_effective_move_and_links_to_its_earlier_entry(self):
+        self.api.capture("OUT\nSYN-HISTORY\nR: Invented Courier")
+        original = self.api.read(
+            "drive_project_movements", DriveProjectMovementsInput, project=self.project
+        )["movements"][0]["id"]
+        self.api.write(
+            "movement_correct",
+            MovementCorrectInput,
+            movement=original,
+            person="Invented Replacement",
+        )
+        html = self.text(self.url)
+        self.assertNotIn(f'data-movement="{original}"', html)
+        self.assertIn("Recipient: Invented Replacement", html)
+        self.assertNotIn("Invented Courier", html)
+        self.assertIn(f'href="/movements/{original}">Correction of the earlier entry</a>', html)
 
 
 class ProjectSearchTests(DriveAppCase):

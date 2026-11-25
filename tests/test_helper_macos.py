@@ -593,12 +593,7 @@ class HelperMacOSE2ETests(DriveAppCase):
         self.assertEqual(len(queued), 1)
         queued_key = json.loads(queued[0].read_text(encoding="utf-8"))["idempotency_key"]
         self.assertTrue(queued_key)
-        self.assertEqual(
-            self.api.read("drive_catalog_snapshots", DriveCatalogSnapshotsInput, drive=drive_id)[
-                "snapshots"
-            ],
-            [],
-        )
+        self.assertNotIn("/v1/drive/catalog-snapshot", self.api.requests)
         logs = self.helper_log_lines()
         self.assertTrue(any(" waiting " in line and "try_later" in line for line in logs), logs)
 

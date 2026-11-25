@@ -1,0 +1,312 @@
+#!/bin/zsh
+set -euo pipefail
+
+volumes_dir="${T6_HELPER_VOLUMES_DIR:-/Volumes}"
+state_dir="${T6_HELPER_STATE_DIR:-$HOME/Library/Application Support/t6-drives-helper}"
+log_dir="${T6_HELPER_LOG_DIR:-$HOME/Library/Logs/t6-drives-helper}"
+rescan_seconds="${T6_HELPER_RESCAN_SECONDS:-900}"
+max_bytes="${T6_HELPER_MAX_BYTES:-12000000}"
+
+if [[ -z "$rescan_seconds" || "$rescan_seconds" == *[!0-9]* ]]; then
+  print -u2 "t6-drive-agent: invalid T6_HELPER_RESCAN_SECONDS: $rescan_seconds"
+  exit 1
+fi
+if [[ -z "$max_bytes" || "$max_bytes" == *[!0-9]* ]]; then
+  print -u2 "t6-drive-agent: invalid T6_HELPER_MAX_BYTES: $max_bytes"
+  exit 1
+fi
+
+work_dir="$state_dir/work"
+queue_dir="$state_dir/queue"
+log_file="$log_dir/helper.log"
+lock_dir="$state_dir/agent.lock"
+
+mkdir -p "$state_dir" "$work_dir" "$queue_dir" "$log_dir"
+
+acquire_lock() {
+  if mkdir "$lock_dir" 2>/dev/null; then
+    print -r -- "$$" > "$lock_dir/pid"
+    return 0
+  fi
+  sleep 0.1
+  local old_pid=""
+  if [[ -r "$lock_dir/pid" ]]; then
+    old_pid=$(<"$lock_dir/pid")
+    old_pid="${old_pid//[[:space:]]/}"
+  fi
+  if [[ -n "$old_pid" && "$old_pid" != *[!0-9]* ]] && ! kill -0 "$old_pid" 2>/dev/null; then
+    rm -rf "$lock_dir"
+    if mkdir "$lock_dir" 2>/dev/null; then
+      print -r -- "$$" > "$lock_dir/pid"
+      return 0
+    fi
+  fi
+  return 1
+}
+
+if ! acquire_lock; then
+  exit 0
+fi
+
+tmp_dir=$(mktemp -d "${TMPDIR:-/tmp}/t6-agent.XXXXXX")
+cleanup() {
+  rm -rf "$tmp_dir" "$lock_dir"
+}
+trap cleanup EXIT INT TERM
+
+script_dir="${0:A:h}"
+find_bin() {
+  local name="$1"
+  local d found=""
+  for d in \
+    "${T6_HELPER_BIN_DIR:-}" \
+    "$script_dir" \
+    "/Library/Application Support/t6-drives-helper" \
+    "/usr/local/libexec/t6-drives-helper" \
+    "/usr/local/bin" \
+    "/opt/homebrew/bin"; do
+    if [[ -n "$d" && -x "$d/$name" ]]; then
+      print -r -- "$d/$name"
+      return 0
+    fi
+  done
+  found=$(command -v "$name" 2>/dev/null || true)
+  if [[ -n "$found" && -x "$found" ]]; then
+    print -r -- "$found"
+    return 0
+  fi
+  return 1
+}
+
+scan_bin=$(find_bin "t6-drive-scan") || {
+  print -u2 "t6-drive-agent: t6-drive-scan not found"
+  exit 1
+}
+send_bin=$(find_bin "t6-drive-send") || {
+  print -u2 "t6-drive-agent: t6-drive-send not found"
+  exit 1
+}
+
+log_event() {
+  local event="$1"
+  local detail="$2"
+  local ts
+  ts=$(date +"%Y-%m-%dT%H:%M:%S%z")
+  print -r -- "$ts $event $detail" >> "$log_file"
+}
+
+file_byte_size() {
+  local path="$1"
+  local sz
+  sz=$(wc -c < "$path")
+  print -r -- "${sz//[[:space:]]/}"
+}
+
+next_seq() {
+  local seq_file="$state_dir/.seq"
+  local seq=0
+  if [[ -r "$seq_file" ]]; then
+    seq=$(<"$seq_file")
+    seq="${seq//[[:space:]]/}"
+    if [[ -z "$seq" || "$seq" == *[!0-9]* ]]; then
+      seq=0
+    fi
+  fi
+  seq=$(( seq + 1 ))
+  print -r -- "$seq" > "$seq_file"
+  printf '%06d' "$seq"
+}
+
+queue_prepare_js="$tmp_dir/queue_prepare.js"
+queue_field_js="$tmp_dir/queue_field.js"
+
+cat <<'JXA' > "$queue_prepare_js"
+ObjC.import("Foundation");
+
+function run(argv) {
+  var srcPath = argv[0];
+  var dstPath = argv[1];
+  var key = argv[2];
+  var nsRaw = $.NSString.stringWithContentsOfFileEncodingError(
+    srcPath,
+    $.NSUTF8StringEncoding,
+    null
+  );
+  if (!nsRaw) {
+    throw new Error("Could not read scan JSON.");
+  }
+  var doc = JSON.parse(ObjC.unwrap(nsRaw));
+  if (!doc.idempotency_key) {
+    doc.idempotency_key = key;
+  }
+  var out = $(JSON.stringify(doc));
+  if (!out.writeToFileAtomicallyEncodingError(dstPath, true, $.NSUTF8StringEncoding, null)) {
+    throw new Error("Could not write queued JSON.");
+  }
+  return String(doc.idempotency_key);
+}
+JXA
+
+cat <<'JXA' > "$queue_field_js"
+ObjC.import("Foundation");
+
+function run(argv) {
+  var path = argv[0];
+  var field = argv[1];
+  var nsRaw = $.NSString.stringWithContentsOfFileEncodingError(
+    path,
+    $.NSUTF8StringEncoding,
+    null
+  );
+  if (!nsRaw) return "";
+  var data;
+  try {
+    data = JSON.parse(ObjC.unwrap(nsRaw));
+  } catch (e) {
+    return "";
+  }
+  if (!data || typeof data !== "object") return "";
+  var val = data[field];
+  return val != null ? String(val) : "";
+}
+JXA
+
+typeset -A mounted_map
+mounted_vols=()
+if [[ -d "$volumes_dir" ]]; then
+  for p in "$volumes_dir"/*(N); do
+    if [[ -d "$p" && ! -L "$p" ]]; then
+      vol_name="${p:t}"
+      mounted_map[$vol_name]=1
+      mounted_vols+=("$vol_name")
+    fi
+  done
+fi
+
+# 1. Handle unmounted volumes: enforce size limit and move active work scan to queue/.
+for wfile in "$work_dir"/*.json(N); do
+  vol_name="${wfile:t}"
+  vol_name="${vol_name%.json}"
+  if [[ -z "${mounted_map[$vol_name]:-}" ]]; then
+    w_bytes=$(file_byte_size "$wfile")
+    if (( w_bytes > max_bytes )); then
+      log_event "too_large" "$vol_name (bytes=$w_bytes limit=$max_bytes)"
+      rm -f "$wfile" "$work_dir/$vol_name.ts"
+      continue
+    fi
+    item_key=$(uuidgen | tr '[:upper:]' '[:lower:]')
+    seq=$(next_seq)
+    utc_ts=$(date -u +"%Y%m%dT%H%M%SZ")
+    q_name="${utc_ts}-${seq}-${item_key}.json"
+    q_tmp="$queue_dir/.tmp.$q_name.$$"
+    q_dst="$queue_dir/$q_name"
+    if osascript -l JavaScript "$queue_prepare_js" "$wfile" "$q_tmp" "$item_key" >/dev/null; then
+      q_bytes=$(file_byte_size "$q_tmp")
+      if (( q_bytes > max_bytes )); then
+        rm -f "$q_tmp" "$wfile" "$work_dir/$vol_name.ts"
+        log_event "too_large" "$vol_name (bytes=$q_bytes limit=$max_bytes)"
+      else
+        mv -f "$q_tmp" "$q_dst"
+        rm -f "$wfile" "$work_dir/$vol_name.ts"
+      fi
+    else
+      rm -f "$q_tmp"
+    fi
+  fi
+done
+
+# 2. Handle mounted volumes: scan on mount or when rescan interval has elapsed.
+if (( ${#mounted_vols[@]} > 0 )); then
+  for vol_name in "${mounted_vols[@]}"; do
+    vol_path="$volumes_dir/$vol_name"
+    wfile="$work_dir/$vol_name.json"
+    tsfile="$work_dir/$vol_name.ts"
+    now_epoch=$(date +%s)
+    do_scan=0
+
+    if [[ ! -f "$wfile" ]]; then
+      do_scan=1
+    else
+      last_ts=0
+      if [[ -r "$tsfile" ]]; then
+        raw_ts=$(<"$tsfile")
+        raw_ts="${raw_ts//[[:space:]]/}"
+        if [[ -n "$raw_ts" && "$raw_ts" != *[!0-9]* ]]; then
+          last_ts="$raw_ts"
+        fi
+      fi
+      if (( now_epoch - last_ts >= rescan_seconds )); then
+        do_scan=1
+      fi
+    fi
+
+    if (( do_scan == 1 )); then
+      tmp_scan="$work_dir/.tmp.$vol_name.$$.json"
+      if "$scan_bin" "$vol_path" > "$tmp_scan"; then
+        mv -f "$tmp_scan" "$wfile"
+        print -r -- "$now_epoch" > "$tsfile"
+        log_event "taken" "$vol_name"
+      else
+        rm -f "$tmp_scan"
+      fi
+    fi
+  done
+fi
+
+# 3. Retry queued scans (oldest first).
+for qfile in "$queue_dir"/*.json(N); do
+  q_label=$(osascript -l JavaScript "$queue_field_js" "$qfile" "volume_name" 2>/dev/null || true)
+  q_label="${q_label//$'\r'/}"
+  q_label="${q_label//$'\n'/ }"
+  [[ -z "$q_label" ]] && q_label="${qfile:t}"
+
+  q_bytes=$(file_byte_size "$qfile")
+  if (( q_bytes > max_bytes )); then
+    rm -f "$qfile"
+    log_event "too_large" "$q_label (bytes=$q_bytes limit=$max_bytes)"
+    continue
+  fi
+
+  q_key=$(osascript -l JavaScript "$queue_field_js" "$qfile" "idempotency_key" 2>/dev/null || true)
+  q_key="${q_key//[[:space:]]/}"
+  if [[ -z "$q_key" ]]; then
+    q_key=$(uuidgen | tr '[:upper:]' '[:lower:]')
+    q_tmp="$queue_dir/.tmp.${qfile:t}.$$"
+    if osascript -l JavaScript "$queue_prepare_js" "$qfile" "$q_tmp" "$q_key" >/dev/null; then
+      mv -f "$q_tmp" "$qfile"
+    else
+      rm -f "$q_tmp"
+    fi
+  fi
+
+  send_err_file="$tmp_dir/send.err"
+  send_rc=0
+  "$send_bin" --key "$q_key" "$qfile" >/dev/null 2>"$send_err_file" || send_rc=$?
+  case "$send_rc" in
+    (0)
+      rm -f "$qfile"
+      log_event "sent" "$q_label (key=$q_key)"
+      ;;
+    (10)
+      log_event "waiting" "$q_label (no_drive)"
+      ;;
+    (11)
+      log_event "waiting" "$q_label (try_later)"
+      ;;
+    (12)
+      rm -f "$qfile"
+      log_event "refused" "$q_label (never)"
+      ;;
+    (13)
+      rm -f "$qfile"
+      log_event "too_large" "$q_label"
+      ;;
+    (*)
+      err_msg=""
+      [[ -r "$send_err_file" ]] && err_msg=$(<"$send_err_file")
+      err_msg="${err_msg//$'\r'/}"
+      err_msg="${err_msg//$'\n'/ }"
+      log_event "waiting" "$q_label (exit=$send_rc $err_msg)"
+      ;;
+  esac
+done

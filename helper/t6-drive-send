@@ -59,24 +59,88 @@ if [[ "$confirm" != "ask" && "$confirm" != "silent" ]]; then
   exit 1
 fi
 
-work_dir=$(mktemp -d "${TMPDIR:-/tmp}/t6-send.XXXXXX")
-trap 'rm -rf "$work_dir"' EXIT
+key_arg=""
+positional=()
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    (--key)
+      if [[ $# -lt 2 || -z "$2" ]]; then
+        print -u2 "Usage: t6-drive-send [--key <uuid>] [scan.json | -]"
+        exit 2
+      fi
+      key_arg="$2"
+      shift 2
+      ;;
+    (--key=*)
+      key_arg="${1#--key=}"
+      if [[ -z "$key_arg" ]]; then
+        print -u2 "Usage: t6-drive-send [--key <uuid>] [scan.json | -]"
+        exit 2
+      fi
+      shift
+      ;;
+    (--)
+      shift
+      while [[ $# -gt 0 ]]; do
+        positional+=("$1")
+        shift
+      done
+      break
+      ;;
+    (-?*)
+      print -u2 "Usage: t6-drive-send [--key <uuid>] [scan.json | -]"
+      exit 2
+      ;;
+    (*)
+      positional+=("$1")
+      shift
+      ;;
+  esac
+done
 
-if [[ $# -gt 1 ]]; then
-  print -u2 "Usage: t6-drive-send [scan.json | -]"
+if [[ ${#positional[@]} -gt 1 ]]; then
+  print -u2 "Usage: t6-drive-send [--key <uuid>] [scan.json | -]"
   exit 2
 fi
 
-if [[ $# -eq 1 && "$1" != "-" ]]; then
-  if [[ ! -r "$1" ]]; then
-    print -u2 "t6-drive-send: scan file not readable: $1"
+work_dir=$(mktemp -d "${TMPDIR:-/tmp}/t6-send.XXXXXX")
+trap 'rm -rf "$work_dir"' EXIT
+
+if [[ ${#positional[@]} -eq 1 && "${positional[1]}" != "-" ]]; then
+  if [[ ! -r "${positional[1]}" ]]; then
+    print -u2 "t6-drive-send: scan file not readable: ${positional[1]}"
     exit 1
   fi
-  scan_file="$1"
+  scan_file="${positional[1]}"
 else
   scan_file="$work_dir/scan.json"
   cat > "$scan_file"
 fi
+
+max_bytes="${T6_HELPER_MAX_BYTES:-12000000}"
+if [[ -z "$max_bytes" || "$max_bytes" == *[!0-9]* ]]; then
+  print -u2 "t6-drive-send: invalid T6_HELPER_MAX_BYTES: $max_bytes"
+  exit 1
+fi
+
+file_byte_size() {
+  local path="$1"
+  local sz
+  sz=$(wc -c < "$path")
+  print -r -- "${sz//[[:space:]]/}"
+}
+
+check_max_bytes() {
+  local path="$1"
+  local sz
+  sz=$(file_byte_size "$path")
+  if (( sz > max_bytes )); then
+    print -u2 "t6-drive-send: too_large ($sz > $max_bytes bytes)"
+    exit 13
+  fi
+}
+
+check_max_bytes "$scan_file"
 
 payload_js="$work_dir/build_payload.js"
 field_js="$work_dir/json_field.js"
@@ -200,11 +264,49 @@ json_field() {
 post_payload() {
   local payload_file="$1"
   local response_file="$2"
-  curl -sS -o "$response_file" -w '%{http_code}' \
+  local code=""
+  local rc=0
+  : > "$response_file"
+  code=$(curl -sS -o "$response_file" -w '%{http_code}' \
+    --connect-timeout 10 \
+    --max-time 75 \
     -H 'Content-Type: application/json' \
     -H "X-Helper-Token: $token" \
     --data-binary @"$payload_file" \
-    "$url/helper/catalog"
+    "$url/helper/catalog") || rc=$?
+  if (( rc != 0 )) || [[ -z "$code" ]]; then
+    print -r -- "000"
+    return 0
+  fi
+  print -r -- "$code"
+}
+
+exit_for_http_error() {
+  local code="$1"
+  local resp_file="$2"
+  local resp_status resp_rule reason
+  resp_status=$(json_field "$resp_file" "status")
+  resp_rule=$(json_field "$resp_file" "rule")
+  reason=$(json_field "$resp_file" "reason")
+
+  if [[ "$code" == "413" || "$resp_status" == "too_large" ]]; then
+    print -u2 "t6-drive-send: too_large (${reason:-HTTP $code})"
+    exit 13
+  fi
+  if [[ "$code" == "000" || "$code" == "503" || "$resp_status" == "try_later" ]]; then
+    print -u2 "t6-drive-send: try_later (${reason:-HTTP $code})"
+    exit 11
+  fi
+  if [[ "$code" == "422" || "$resp_status" == "no_drive" ]]; then
+    print -u2 "t6-drive-send: no_drive (${reason:-HTTP $code})"
+    exit 10
+  fi
+  if [[ "$code" == "409" && ( "$resp_status" == "never" || "$resp_rule" == "catalog_order" ) ]]; then
+    print -u2 "t6-drive-send: never (${reason:-HTTP $code})"
+    exit 12
+  fi
+  print -u2 "t6-drive-send: ${reason:-HTTP $code}"
+  exit 1
 }
 
 run_dialog() {
@@ -241,46 +343,52 @@ run_open() {
   fi
 }
 
-idempotency_key=$(uuidgen | tr '[:upper:]' '[:lower:]')
+idempotency_key=$(trim_ws "$key_arg")
+if [[ -z "$idempotency_key" ]]; then
+  idempotency_key=$(trim_ws "$(json_field "$scan_file" "idempotency_key")")
+fi
+if [[ -z "$idempotency_key" ]]; then
+  idempotency_key=$(uuidgen | tr '[:upper:]' '[:lower:]')
+fi
+
 payload_file="$work_dir/payload.json"
 response_file="$work_dir/response.json"
 
 if [[ "$confirm" == "silent" ]]; then
   build_payload "save" "$idempotency_key" "" "$payload_file" >/dev/null
+  check_max_bytes "$payload_file"
   http_code=$(post_payload "$payload_file" "$response_file")
   resp_status=$(json_field "$response_file" "status")
   if [[ "$http_code" == "200" && "$resp_status" == "saved" ]]; then
     exit 0
   fi
-  reason=$(json_field "$response_file" "reason")
-  print -u2 "t6-drive-send: ${reason:-HTTP $http_code}"
-  exit 1
+  exit_for_http_error "$http_code" "$response_file"
 fi
 
 volume_name=$(build_payload "preview" "$idempotency_key" "" "$payload_file")
+check_max_bytes "$payload_file"
 http_code=$(post_payload "$payload_file" "$response_file")
 resp_status=$(json_field "$response_file" "status")
 typed_label=""
 
 if [[ "$http_code" == "422" || "$resp_status" == "no_drive" ]]; then
   if ! typed_label=$(run_dialog "label" "$volume_name"); then
-    print -u2 "Canceled."
-    exit 0
+    print -u2 "t6-drive-send: no_drive (canceled)"
+    exit 10
   fi
   typed_label=$(trim_ws "${typed_label//$'\r'/}")
   if [[ -z "$typed_label" ]]; then
-    print -u2 "Canceled."
-    exit 0
+    print -u2 "t6-drive-send: no_drive (canceled)"
+    exit 10
   fi
   build_payload "preview" "$idempotency_key" "$typed_label" "$payload_file" >/dev/null
+  check_max_bytes "$payload_file"
   http_code=$(post_payload "$payload_file" "$response_file")
   resp_status=$(json_field "$response_file" "status")
 fi
 
 if [[ "$http_code" != "200" || "$resp_status" != "preview" ]]; then
-  reason=$(json_field "$response_file" "reason")
-  print -u2 "t6-drive-send: ${reason:-HTTP $http_code}"
-  exit 1
+  exit_for_http_error "$http_code" "$response_file"
 fi
 
 drive_label=$(json_field "$response_file" "drive_label")
@@ -300,13 +408,12 @@ if [[ "${confirm_lower:l}" == "cancel" ]]; then
 fi
 
 build_payload "save" "$idempotency_key" "$typed_label" "$payload_file" >/dev/null
+check_max_bytes "$payload_file"
 http_code=$(post_payload "$payload_file" "$response_file")
 resp_status=$(json_field "$response_file" "status")
 
 if [[ "$http_code" != "200" || "$resp_status" != "saved" ]]; then
-  reason=$(json_field "$response_file" "reason")
-  print -u2 "t6-drive-send: ${reason:-HTTP $http_code}"
-  exit 1
+  exit_for_http_error "$http_code" "$response_file"
 fi
 
 catalog_url=$(json_field "$response_file" "catalog_url")

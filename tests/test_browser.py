@@ -237,11 +237,11 @@ class BrowserTest(DriveAppCase):
         page.goto(f"{self.base}/drive/{drive_id}")
         page.get_by_role("link", name="Contents", exact=True).click()
         expect(page.get_by_text("No scans yet")).to_be_visible()
-        for day, entries in (
-            ("2026-03-01", FIRST_SCAN),
-            ("2026-03-10", SECOND_SCAN),
+        for when, entries in (
+            ("2026-03-01T09:00", FIRST_SCAN),
+            ("2026-03-10T10:00", SECOND_SCAN),
         ):
-            page.get_by_label("Scan date", exact=True).fill(day)
+            page.get_by_label("Scan date and time", exact=True).fill(when)
             page.get_by_label("Manifest file", exact=True).set_input_files(
                 {
                     "name": "scan.json",

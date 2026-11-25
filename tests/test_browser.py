@@ -102,7 +102,7 @@ class BrowserTest(DriveAppCase):
         env.start()
         self.addCleanup(env.stop)
         drive = self.api.add_drive(label="Synthetic photo drive", serial="SYN-PHOTO")
-        self.api.capture("OUT Invented Courier|SYN-PHOTO")
+        self.api.capture("OUT\nSYN-PHOTO\nR: Invented Courier")
         movement = self.api.read("movement_list", MovementListInput, drive=drive)["movements"][0]
         path = self.directory + "/synthetic.png"
         with open(path, "wb") as file:
@@ -120,7 +120,9 @@ class BrowserTest(DriveAppCase):
             self.page.goto(self.base + f"/movements?drive={drive}")
             thumb = self.page.locator(f'img[src="/movements/{movement["id"]}/photo"]')
             expect(thumb).to_be_visible()
-            self.assertGreater(thumb.evaluate("img => img.naturalWidth"), 0)
+            self.page.wait_for_function(
+                "document.querySelector('img[src$=\"/photo\"]').naturalWidth > 0", timeout=5000
+            )
             self.assertLessEqual(self.page.evaluate("document.documentElement.scrollWidth"), width)
             with patch.dict(os.environ, {"T6_DRIVE_CUSTODIAN_PERSON_ID": self.api.custodian}):
                 self.page.goto(self.base + f"/movements/{movement['id']}")
@@ -292,21 +294,21 @@ class BrowserTest(DriveAppCase):
         page.get_by_role("button", name="Find", exact=True).click()
         expect(page.get_by_role("link", name="synthetic first", exact=True)).to_be_visible()
 
-    def test_exceptions_corrections_and_place_at_phone_and_desktop_width(self):
+    def test_inbox_exceptions_corrections_and_place_at_phone_and_desktop_width(self):
         project = self.api.project("Synthetic exceptions project")
         drive = self.api.add_drive(
             label="Synthetic exception master " + "x" * 100, serial="SYN-EXC-" + "9" * 80
         )
         self.api.add_drive(label="Synthetic spare", serial="SYN-SPARE")
-        self.api.capture("OUT Invented Courier|SYN-EXC-" + "9" * 80, message=1)
-        capture = self.api.capture("OUT Invented Courier|" + "NOWHERE-" * 20, message=2)
+        self.api.capture("OUT\nSYN-EXC-" + "9" * 80 + "\nR: Invented Courier", message=1)
+        self.api.waiting_capture("OUT\n" + "NOWHERE-" * 20 + "\nR: Invented Courier", message=2)
         movement = self.api.read("movement_list", MovementListInput)["movements"][0]["id"]
         for width in (375, 1280):
             page = self.page
             page.set_viewport_size({"width": width, "height": 900})
             for path in (
+                "/inbox",
                 "/exceptions",
-                f"/captures/{capture}/drive",
                 f"/movements/{movement}/correct",
                 f"/movements?drive={drive}",
                 f"/drive/{drive}",
@@ -315,24 +317,28 @@ class BrowserTest(DriveAppCase):
                 self.assertLessEqual(
                     page.evaluate("document.documentElement.scrollWidth"), width, path
                 )
-            page.goto(self.base + "/exceptions")
+            page.goto(self.base + "/inbox")
             photo = page.locator("img.capture-photo")
             expect(photo).to_be_visible()
             page.wait_for_function(
                 "document.querySelector('img.capture-photo').naturalWidth > 0", timeout=5000
             )
+            page.get_by_role("button", name="None", exact=True).click()
+            expect(page.get_by_role("status")).to_contain_text("Left waiting")
+            expect(page.get_by_role("button", name="New drive", exact=True)).to_be_visible()
+            expect(page.get_by_role("button", name="Not a drive", exact=True)).to_be_visible()
+            self.assertLessEqual(page.evaluate("document.documentElement.scrollWidth"), width)
         page = self.page
         page.set_viewport_size({"width": 375, "height": 900})
         page.goto(self.base + "/exceptions")
         page.get_by_label("Project", exact=True).select_option(project)
         page.get_by_role("button", name="Set Project", exact=True).click()
         expect(page.locator('[data-group="projects"] .empty-title')).to_have_text("Nothing to do.")
-        page.get_by_role("link", name="Give it a Drive").click()
-        page.get_by_label("Find a Drive").fill("SYN-SPARE")
-        page.get_by_role("button", name="Find", exact=True).click()
-        page.get_by_role("button", name="Give this Drive").click()
-        expect(page.get_by_role("status")).to_contain_text("was given a Drive")
-        expect(page.locator('[data-group="photos"] .empty-title')).to_have_text("Nothing to do.")
+        page.get_by_role("link", name="Inbox", exact=True).click()
+        page.get_by_label("Drive label or serial").fill("SYN-SPARE")
+        page.get_by_role("button", name="Type it", exact=True).click()
+        expect(page.get_by_role("status")).to_contain_text("Approved")
+        expect(page.locator(".empty-title")).to_have_text("Nothing to approve.")
         page.goto(self.base + f"/drive/{drive}")
         page.get_by_label("Place", exact=True).select_option("SHELF")
         page.get_by_role("button", name="Save place and ownership").click()

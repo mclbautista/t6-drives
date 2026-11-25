@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+{% block title %}Inbox{% endblock %}
+{% block content %}
+<div class="page-head"><h1>Inbox</h1></div>
+{% if flash %}<p role="status">{{ flash }}</p>{% endif %}
+<p class="lead">Items waiting for approval, newest first.</p>
+<ul class="stack">
+{% for c in items %}<li class="card" data-capture="{{ c.capture }}" data-item="{{ c.item }}">
+<div class="capture">
+{% if c.photo_reference %}<a href="/captures/{{ c.photo_reference }}/photo"><img class="capture-photo" src="/captures/{{ c.photo_reference }}/photo" alt="Photo posted {{ c.posted_at }}" loading="lazy"></a>{% else %}<p class="muted">No photo is kept.</p>{% endif %}
+<div class="capture-text">
+<h2>{{ c.text|plain }}</h2>
+<p>{{ c.direction }}{% if c.recipient %} · Recipient: {{ c.recipient|plain }}{% endif %}</p>
+<p class="muted small">Posted {{ c.posted_at }}{% if c.post_url %} · <a href="{{ c.post_url }}" target="_blank" rel="noopener noreferrer">Open the post</a>{% endif %}</p>
+<p class="capture-line">{{ c.caption|plain }}</p>
+</div></div>
+{% if c.guesses %}<h3>Guesses</h3><ul class="plain">{% for g in c.guesses %}<li>
+<form class="inline" method="post" action="/inbox/{{ c.capture }}/{{ c.item }}/approve">{% include "_hidden.html" %}<input type="hidden" name="drive" value="{{ g.drive }}"><button class="btn btn--primary" name="choice" value="drive">{{ g.label|plain }}</button>{% if g.serial %}<span class="muted">Serial {{ g.serial|plain }}</span>{% endif %}<span>{{ (g.confidence * 100)|round|int }}%{% if g.exact %} · ✓ Exact{% endif %}</span></form>
+<p class="muted small">{{ g.reason|plain }}</p>
+</li>{% endfor %}</ul>{% else %}<p class="muted">No guesses yet.</p>{% endif %}
+<form class="inline" method="post" action="/inbox/{{ c.capture }}/{{ c.item }}/approve">{% include "_hidden.html" %}<button class="btn" name="choice" value="new">New drive</button><button class="btn" name="choice" value="not_a_drive">Not a drive</button><button class="btn btn--quiet" name="choice" value="none">None</button></form>
+<form class="inline" method="post" action="/inbox/{{ c.capture }}/{{ c.item }}/approve">{% include "_hidden.html" %}<label for="typed-{{ c.capture }}-{{ c.item }}">Drive label or serial</label><input id="typed-{{ c.capture }}-{{ c.item }}" name="typed" required><button class="btn" name="choice" value="drive">Type it</button></form>
+</li>{% else %}<li class="card empty"><p class="empty-title">Nothing to approve.</p></li>{% endfor %}
+</ul>
+{% endblock %}

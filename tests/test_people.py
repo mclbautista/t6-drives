@@ -17,7 +17,7 @@ class PersonPickerTests(DriveAppCase):
         )
         self.api.notion.add_page("contacts", {"Name": title("Synthetic Ben Reyes")})
         self.drive = self.api.add_drive(label="Synthetic master", serial="SYN-M")
-        self.api.capture("OUT Typed Courier|SYN-M")
+        self.api.capture("OUT\nSYN-M\nR: Typed Courier")
 
     def found(self, q):
         response = self.web.get("/people/find", query_string={"q": q})

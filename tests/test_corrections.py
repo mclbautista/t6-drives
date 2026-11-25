@@ -4,9 +4,8 @@ import re
 from datetime import date, timedelta
 from typing import Any
 
-from support import PHOTO, DriveAppCase
+from support import DriveAppCase
 from t6.verbs import (
-    DriveCaptureListInput,
     DriveReleaseInput,
     DriveReloadReportInput,
     MovementListInput,
@@ -18,7 +17,7 @@ class CorrectionCase(DriveAppCase):
     def released_drive(self) -> tuple[str, str]:
         """A Drive released by a recording post: its Drive ID and the movement the post made."""
         drive = self.api.add_drive(label="Synthetic master", serial="SYN-M")
-        self.api.capture("OUT Invented Courier|SYN-M")
+        self.api.capture("OUT\nSYN-M\nR: Invented Courier")
         return drive, self.movements(drive=drive)[0]["id"]
 
     def movements(self, **filters: Any) -> list[dict[str, Any]]:
@@ -99,7 +98,7 @@ class CorrectMovementTests(CorrectionCase):
     def test_the_movement_log_links_to_corrections_and_filters_by_drive(self):
         drive, movement = self.released_drive()
         other = self.api.add_drive(label="Synthetic untouched", serial="SYN-U")
-        self.api.capture("OUT Invented Courier|SYN-U", message=2)
+        self.api.capture("OUT\nSYN-U\nR: Invented Courier", message=2)
         html = self.text(f"/movements?drive={drive}")
         self.assertIn(f'href="/movements/{movement}/correct"', html)
         self.assertIn("Synthetic master", html)
@@ -189,71 +188,6 @@ class PlaceAndOwnershipTests(CorrectionCase):
 
 
 class ExceptionsPageTests(CorrectionCase):
-    def test_an_unresolved_capture_shows_its_photo_and_text(self):
-        capture = self.api.capture("OUT Invented Courier|SYN-NOWHERE")
-        html = self.text("/exceptions")
-        self.assertIn("Give a photo a Drive", html)
-        self.assertIn("OUT Invented Courier|SYN-NOWHERE", html)
-        self.assertIn(f'<img class="capture-photo" src="/captures/{capture}/photo"', html)
-        self.assertIn("2026-11-02", html)
-        self.assertIn(f'href="/captures/{capture}/drive"', html)
-        photo = self.web.get(f"/captures/{capture}/photo")
-        self.assertEqual(photo.status_code, 200)
-        self.assertEqual(photo.data, PHOTO)
-        self.assertEqual(photo.headers["Content-Type"], "image/png")
-        self.assertEqual(photo.headers["Cache-Control"], "no-store")
-        self.assertEqual(photo.headers["X-Content-Type-Options"], "nosniff")
-        self.assertIn("default-src 'none'", photo.headers["Content-Security-Policy"])
-
-    def test_text_a_sender_typed_is_escaped(self):
-        self.api.capture("OUT <b>raw</b>|SYN-NOWHERE")
-        html = self.text("/exceptions")
-        self.assertIn("OUT &lt;b&gt;raw&lt;/b&gt;|SYN-NOWHERE", html)
-        self.assertNotIn("<b>raw", html)
-
-    def test_the_photo_of_an_unknown_or_malformed_capture_is_not_found(self):
-        self.assertEqual(self.web.get("/captures/capture_" + "0" * 32 + "/photo").status_code, 404)
-        self.assertEqual(self.web.get("/captures/..%2Fx/photo").status_code, 404)
-
-    def test_no_unresolved_captures_say_so_and_leave_no_form(self):
-        html = self.text("/exceptions")
-        self.assertIn("Nothing to do.", html)
-        self.assertNotIn("<form", html)
-
-    def test_a_capture_is_given_a_drive_picked_from_search(self):
-        drive = self.api.add_drive(label="Synthetic picked", serial="SYN-P")
-        self.api.add_drive(label="Synthetic other", serial="SYN-X")
-        capture = self.api.capture("OUT Invented Courier|SYN-NOWHERE")
-        page = self.text(f"/captures/{capture}/drive")
-        self.assertIn("Synthetic picked", page)
-        found = self.text(f"/captures/{capture}/drive?q=SYN-P")
-        self.assertIn("Synthetic picked", found)
-        self.assertNotIn("Synthetic other", found)
-        self.assertIn(f'name="drive" value="{drive}"', found)
-        response = self.submit(
-            f"/captures/{capture}/drive", form=f"/captures/{capture}/drive?q=SYN-P", drive=drive
-        )
-        self.assertEqual(response.status_code, 303)
-        self.assertEqual(response.headers["Location"], "/exceptions")
-        listed = self.api.read("drive_capture_list", DriveCaptureListInput)
-        self.assertEqual(listed["captures"], [])
-        self.assertIn("was given a Drive", self.text("/exceptions"))
-        self.assertNotIn("was given a Drive", self.text("/exceptions"))
-        # t6's worker resolves it as a normal movement.
-        self.api.resolve_capture(capture, revision=1)
-        self.assertEqual(self.status(drive), "released")
-        self.assertEqual(self.movements(drive=drive)[0]["capture"], capture)
-        self.assertNotIn(f'data-capture="{capture}"', self.text("/exceptions"))
-
-    def test_a_drive_that_is_not_there_is_refused_and_shown(self):
-        self.api.add_drive(label="Synthetic listed", serial="SYN-L")
-        capture = self.api.capture("OUT Invented Courier|SYN-NOWHERE")
-        response = self.submit(f"/captures/{capture}/drive", drive="t6d_" + "0" * 32)
-        self.assertEqual(response.status_code, 400)
-        self.assertIn("Drive not found", response.get_data(as_text=True))
-        self.assertIn(capture, self.text("/exceptions"))
-        self.assertEqual(self.web.get("/captures/capture_" + "0" * 32 + "/drive").status_code, 404)
-
     def test_setting_a_project_removes_a_movement_from_the_needs_a_project_list(self):
         project = self.api.project("Synthetic needs project")
         drive, movement = self.released_drive()

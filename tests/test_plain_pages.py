@@ -118,9 +118,11 @@ class PlainPageCase(DriveAppCase):
         ]
         # A recording post that names a Drive: a movement without a Project.
         self.moved = self.api.add_drive(label="Synthetic no project", serial="SYN-NOPROJ")
-        self.api.capture("OUT Invented Courier|SYN-NOPROJ", message=1)
-        # A recording post nobody could match: an unresolved capture.
-        self.capture = self.api.capture("nothing readable here", message=2, day="2026-11-03")
+        self.api.capture("OUT\nSYN-NOPROJ\nR: Invented Courier", message=1)
+        # An unmatched recording post waits in the Inbox.
+        self.capture = self.api.waiting_capture(
+            "IN\nSynthetic uncertain case", message=2, day="2026-11-03"
+        )
         self.api.import_exception(
             workbook="synthetic.xlsx", sheet="Log", row=7, reason="bad row", detail="x"
         )
@@ -152,8 +154,8 @@ class PlainPageCase(DriveAppCase):
             f"/movements/{self.movement}/correct",
             f"/movements/{self.movement}",
             "/people/new",
+            "/inbox",
             "/exceptions",
-            f"/captures/{self.capture}/drive",
             drive,
             f"/drive/{self.other}",
             f"/drive/{self.late}",

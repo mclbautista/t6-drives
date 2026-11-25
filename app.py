@@ -16,10 +16,10 @@ from t6.client import Client
 from t6.verbs import (
     ContactFindInput,
     Done,
-    DriveCaptureListInput,
     DriveCaptureReadInput,
     DriveExceptionsInput,
     DriveGetInput,
+    DriveInboxInput,
     DriveListInput,
     DriveOverdueInput,
     DriveProjectsInput,
@@ -85,7 +85,6 @@ ID = re.compile(
 )  # what an ID in a path may look like; the API judges the rest
 PHOTO_TYPES = ("image/png", "image/jpeg", "image/webp")
 SHEET_ID = re.compile(r"[A-Za-z0-9_-]{20,}")
-PICKS = 20  # Drives offered when a capture is given one
 
 
 def sheet_url(workbook: str) -> str | None:
@@ -775,15 +774,6 @@ def create_app(
             missing_is_404=False,
         )
 
-    def unresolved_capture(capture_id: str) -> dict[str, Any]:
-        if not ID.fullmatch(capture_id):
-            abort(404)
-        listed = gateway.read("drive_capture_list", DriveCaptureListInput())["captures"]
-        found = next((c for c in listed if c["capture"] == capture_id), None)
-        if found is None:
-            abort(404)
-        return found
-
     @app.get("/captures/<capture_id>/photo")
     def capture_photo(capture_id):
         """The photo of a capture, read from the API for this one request: never stored or logged here."""
@@ -810,40 +800,66 @@ def create_app(
             },
         )
 
-    @app.route("/captures/<capture_id>/drive", methods=["GET", "POST"])
-    def give_capture_a_drive(capture_id):
-        capture = unresolved_capture(capture_id)
-        if request.method == "GET":
-            q = request.args.get("q", "").strip()
-            drives = gateway.read("drive_list", DriveListInput(q=q or None, limit=PICKS))["drives"]
-            return render_template(
-                "capture_drive.html",
-                capture=capture,
-                q=q,
-                drives=drives,
-                csrf=csrf(),
-                new_key=new_key,
+    @app.get("/inbox")
+    def inbox():
+        items = gateway.read("drive_inbox", DriveInboxInput())["items"]
+        drives: dict[str, dict[str, Any]] = {}
+        for item in items:
+            chat = str(item["chat_id"])
+            topic = f"{item['topic_id']}/" if item["topic_id"] is not None else ""
+            item["post_url"] = (
+                f"https://t.me/c/{chat[4:]}/{topic}{item['message_id']}"
+                if chat.startswith("-100")
+                else None
             )
-        drive = request.form.get("drive", "").strip()
-        outcome = gateway.submit(
-            "drive_capture", {"capture": capture_id, "drive": drive}, posted_key(request.form)
+            for guess in item["guesses"]:
+                drive_id = guess["drive"]
+                if drive_id not in drives:
+                    drives[drive_id] = gateway.read("drive_get", DriveGetInput(drive=drive_id))[
+                        "drive"
+                    ]
+                guess["label"] = drives[drive_id]["label"] or "Drive without a label"
+                guess["serial"] = drives[drive_id]["serial"]
+        return render_template(
+            "inbox.html",
+            items=items,
+            flash=session.pop("flash", None),
+            csrf=csrf(),
+            new_key=new_key,
         )
 
-        def done(_: Any) -> str:
-            session["flash"] = "The photo was given a Drive. It becomes a movement shortly."
-            return "/exceptions"
+    @app.post("/inbox/<capture_id>/<int:item>/approve")
+    def approve_item(capture_id, item):
+        if not ID.fullmatch(capture_id):
+            abort(404)
+        values = {
+            "capture": capture_id,
+            "item": item,
+            "choice": request.form.get("choice", ""),
+            "drive": request.form.get("drive", "").strip() or None,
+            "typed": request.form.get("typed", "").strip() or None,
+        }
+        outcome = gateway.submit("drive_approve", values, posted_key(request.form))
+
+        def done(result: Done) -> str:
+            session["flash"] = {
+                "approved": "Approved. The item is no longer waiting.",
+                "not_a_drive": "Marked as not a drive.",
+                "open": "Left waiting. You can choose later.",
+                "closed": "This item is closed.",
+            }[result.result["state"]]
+            return "/inbox"
 
         return finish(
             outcome,
             done,
-            lambda error: notice(error, request.path, "Pick a Drive"),
+            lambda error: notice(error, "/inbox", "Inbox"),
             missing_is_404=False,
         )
 
     @app.get("/exceptions")
     def exceptions():
         reads = gateway.read
-        captures = reads("drive_capture_list", DriveCaptureListInput())["captures"]
         needs_project = reads("movement_list", MovementListInput(needs_project=True))["movements"]
         rows = reads("drive_exceptions", DriveExceptionsInput())["exceptions"]
         report = reads("drive_reload_report", DriveReloadReportInput())["report"]
@@ -854,7 +870,6 @@ def create_app(
             for x in rows
         ]
         groups = [
-            todo_group("photos", captures, "photo to give a Drive", "photos to give a Drive"),
             todo_group(
                 "projects",
                 needs_project,
@@ -868,7 +883,6 @@ def create_app(
             "exceptions.html",
             groups=groups,
             todo_total=sum(g["count"] for g in groups),
-            captures=captures,
             needs_project=needs_project,
             rows=rows,
             report=report,

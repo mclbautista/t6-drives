@@ -21,7 +21,7 @@ class PhotoCase(DriveAppCase):
         env.start()
         self.addCleanup(env.stop)
         self.drive = self.api.add_drive(label="Synthetic master", serial="SYN-M")
-        self.api.capture("OUT Invented Courier|SYN-M")
+        self.api.capture("OUT\nSYN-M\nR: Invented Courier")
         self.movement = self.movements()[0]["id"]
 
     def movements(self) -> list[dict[str, Any]]:

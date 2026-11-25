@@ -45,6 +45,7 @@ SYSTEM = (
 VERB_WORDS = {
     "contact_create": "New person",
     "drive_add": "New Drive",
+    "drive_approve": "Inbox choice",
     "drive_edit": "Change to a Drive",
     "drive_promote_serial": CONFIRM_SERIAL,
     "drive_assign": "Start " + PROJECT_USE,
@@ -62,7 +63,7 @@ VERB_WORDS = {
 }
 
 # An internal ID: it may sit in a link or a form value, never in what a person reads.
-ID_PATTERN = re.compile(r"t6[a-z]_[0-9a-f]+")
+ID_PATTERN = re.compile(r"(?:t6[a-z]_|capture_)[0-9a-f]+")
 DRIVE_ID = re.compile(r"(?:Drive )?t6d_[0-9a-f]+")
 PROJECT_ID = re.compile(r"(?:Project )?t6p_[0-9a-f]+")
 
@@ -73,6 +74,7 @@ def looks_like_id(text: str) -> bool:
 
 # A message from the API may still use a system word; this is what it is called to the person.
 SAY = (
+    (re.compile(r"\[person[^\]]*\]", re.IGNORECASE), "a person"),
     (re.compile(r"suspected serial", re.IGNORECASE), SERIAL_TO_CHECK),
     (re.compile(r"accepted serial", re.IGNORECASE), SERIAL),
     (re.compile(r"custody events?", re.IGNORECASE), MOVEMENT),
@@ -97,6 +99,8 @@ def waiting_entry(entry: Mapping[str, Any]) -> dict[str, Any]:
     shown = [
         (name.replace("_", " "), value)
         for name, value in entry["inputs"].items()
-        if isinstance(value, (str, int, float)) and not looks_like_id(str(value))
+        if isinstance(value, (str, int, float))
+        and not looks_like_id(str(value))
+        and not (entry["verb"] == "drive_approve" and name == "item")
     ]
     return {**entry, "what": VERB_WORDS.get(entry["verb"], "A change"), "shown": shown}

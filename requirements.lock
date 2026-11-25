@@ -50,7 +50,7 @@ rpds-py==2026.9.1
     #   referencing
 segno==1.6.6
     # via t6-drives
-t6 @ git+https://github.com/mclbautista/t6-core.git@9b1d673668e164dab3fd36834fe28ec6892f957b
+t6 @ git+https://github.com/mclbautista/t6-core.git@dab32de60a037d73953736a0551be5be417f45df
     # via t6-drives
 typing-extensions==4.16.0
     # via

@@ -102,7 +102,12 @@ def todo_group(name: str, items: list[Any], one: str, many: str) -> dict[str, An
 
 
 def create_app(
-    client: Client, outbox: str, *, retry_interval: float = 5.0, allowed_host: str = ""
+    client: Client,
+    outbox: str,
+    *,
+    retry_interval: float = 5.0,
+    allowed_host: str = "",
+    helper_token: str = "",
 ) -> Flask:
     if allowed_host and (
         allowed_host == "0.0.0.0"
@@ -151,6 +156,11 @@ def create_app(
             )
         ):
             abort(400)
+        if request.path == "/helper/catalog":
+            if not helper_token:
+                abort(404)
+            allow_manifest(request.path)
+            return
         if request.method not in ("GET", "HEAD", "OPTIONS"):
             allow_manifest(
                 request.path
@@ -167,7 +177,7 @@ def create_app(
     @app.before_request
     def retry_queued_writes():
         gateway.practice.set(None)
-        if request.path != "/health":
+        if request.path not in ("/health", "/helper/catalog"):
             gateway.retry()
 
     app.jinja_env.filters["plain"] = glossary.plain
@@ -682,7 +692,7 @@ def create_app(
         )
 
     register_custody(app, gateway, csrf)
-    register_catalog(app, gateway, csrf)
+    register_catalog(app, gateway, csrf, helper_token=helper_token)
     register_shipments(app, gateway, csrf)
     register_reload(app, gateway, csrf)
 

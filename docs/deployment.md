@@ -11,6 +11,7 @@ Loopback-only by default; reachable from the office network only when configured
 | `DRIVES_SESSION_SECRET` | At least 32 characters; signs form tokens. Rotating it invalidates open forms. |
 | `DRIVES_OUTBOX` | The outbox file, directly inside `/data` (default `/data/outbox.json`). |
 | `DRIVES_ALLOWED_HOST` | Optional. One office host name or IP address accepted besides `localhost` and `127.0.0.1` (see [Office network](#office-network)). |
+| `DRIVES_HELPER_TOKEN` | Optional. Shared secret header token enabling `POST /helper/catalog` for the custodian Mac helper. Empty by default (route answers 404). |
 
 Secrets are never in the image, a build argument, a log line or an error page. Compose takes them from the host environment and refuses to start without them.
 
@@ -66,6 +67,15 @@ Check: from another office machine, open `http://<address>:5000/health` (204) an
 ```sh
 curl -s -o /dev/null -w '%{http_code}\n' -H 'Host: other.example' http://192.0.2.10:5000/health   # 400
 ```
+
+## Helper endpoint
+
+Set `DRIVES_HELPER_TOKEN` in the host environment (never in the image) to enable `POST /helper/catalog` for the custodian Mac helper. When `DRIVES_HELPER_TOKEN` is empty, `POST /helper/catalog` answers `404` as if the route did not exist.
+
+- Requests authenticate with `X-Helper-Token: <token>` or `Authorization: Bearer <token>` (compared with `secrets.compare_digest`; missing or wrong tokens return `401` JSON `{"status": "unauthorized", ...}` and are never logged).
+- The `Host` check (`DRIVES_ALLOWED_HOST` on the office network) and the 12 MB manifest body limit apply; browser session cookies, CSRF form tokens, and `Origin` checks do not.
+- Drive matching runs in order: (1) `drive find` by `serial` (accepted match, or unique suspected match), (2) `volume_name` matching a unique Drive's open Project use label, (3) typed `label` matching a unique Drive's open Project use label (`422` `no_drive` otherwise).
+- Returns `200` (`preview` or `saved` with diff counts and `catalog_url`), `400` (`invalid`), `409` (`never` on `catalog_order`), or `503` (`try_later` when the t6 API is unreachable). Failed or unavailable helper scans are never queued in the outbox.
 
 ## When the API is down
 

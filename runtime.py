@@ -20,6 +20,12 @@ def application() -> Flask:
     if not Path(outbox).is_absolute() or Path(outbox).parent != Path("/data"):
         raise RuntimeError("Container outbox must be directly inside the dedicated /data volume.")
     allowed_host = os.environ.get("DRIVES_ALLOWED_HOST", "")
-    app = create_app(Client(url, api_secret), outbox, allowed_host=allowed_host)
+    helper_token = os.environ.get("DRIVES_HELPER_TOKEN", "")
+    app = create_app(
+        Client(url, api_secret),
+        outbox,
+        allowed_host=allowed_host,
+        helper_token=helper_token,
+    )
     app.secret_key = secret
     return app

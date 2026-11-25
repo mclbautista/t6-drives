@@ -196,7 +196,8 @@ class Gateway:
             WRITES[method](**values, idempotency_key=key)
         except ValidationError:
             return Refused(rule="input", reason="Check the values entered.")
-        outcome = call(self.client, method, WRITES[method](**values, idempotency_key=key))
+        client = self._slow if method in NOT_QUEUED else self.client
+        outcome = call(client, method, WRITES[method](**values, idempotency_key=key))
         if isinstance(outcome, Unavailable):
             raise ApiUnavailable
         return outcome

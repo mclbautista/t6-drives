@@ -1,7 +1,7 @@
 """Corrections, place and ownership, and the Exceptions page, against the real API."""
 
 import re
-from datetime import date, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from support import DriveAppCase
@@ -247,7 +247,8 @@ class ExceptionsPageTests(CorrectionCase):
             project=project,
             party="Invented Recipient",
             party_kind="contact",
-            on=(date.today() - timedelta(days=40)).isoformat(),
+            # t6 counts days out in Manila days, so date the release from Manila today.
+            on=(datetime.now(timezone(timedelta(hours=8))).date() - timedelta(days=40)).isoformat(),
         )
         html = self.text("/exceptions")
         self.assertIn("Overdue T6 drives", html)

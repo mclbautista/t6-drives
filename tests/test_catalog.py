@@ -2,7 +2,9 @@
 
 import io
 import json
+import re
 import unittest
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from support import DriveAppCase
@@ -261,6 +263,100 @@ class CatalogTests(DriveAppCase):
 
     def test_an_unknown_drive_has_no_catalog(self):
         self.assertEqual(self.web.get("/drive/t6d_" + "0" * 32 + "/catalog").status_code, 404)
+
+    def test_two_scans_on_one_day_show_with_times_newest_first_and_both_links_work(self):
+        self.assertEqual(self.upload(FIRST, on="2026-03-01T09:15:00+08:00").status_code, 303)
+        self.assertEqual(self.upload(SECOND, on="2026-03-01T14:30").status_code, 303)
+        page = self.text(self.url)
+        self.assertEqual(page.count("data-snapshot-id"), 2)
+        self.assertIn("2026-03-01 09:15", page)
+        self.assertIn("2026-03-01 14:30", page)
+        self.assertLess(page.index("2026-03-01 14:30"), page.index("2026-03-01 09:15"))
+
+        snapshots = self.api.read(
+            "drive_catalog_snapshots", DriveCatalogSnapshotsInput, drive=self.drive
+        )["snapshots"]
+        self.assertEqual(
+            [s["captured_on"] for s in snapshots],
+            ["2026-03-01T09:15:00+08:00", "2026-03-01T14:30:00+08:00"],
+        )
+        early_id, late_id = snapshots[0]["id"], snapshots[1]["id"]
+
+        diff_links = dict(
+            re.findall(r'data-snapshot-id="([^"]+)".*?href="([^"]+\?diff=[^"]+)"', page, re.DOTALL)
+        )
+        contents_links = dict(
+            re.findall(r'data-snapshot-id="([^"]+)".*?href="([^"]+\?on=[^"]+)"', page, re.DOTALL)
+        )
+        self.assertEqual(set(diff_links), {early_id, late_id})
+        self.assertEqual(set(contents_links), {early_id, late_id})
+
+        early_diff = self.text(diff_links[early_id])
+        self.assertIn("notes.txt", early_diff)
+        self.assertNotIn("clip3.mov", early_diff)
+
+        late_diff = self.text(diff_links[late_id])
+        self.assertIn("clip3.mov", late_diff)
+        self.assertIn("change--removed", late_diff)
+
+        early_tree = self.text(contents_links[early_id])
+        self.assertIn("notes.txt", early_tree)
+        self.assertNotIn("clip3.mov", early_tree)
+        self.assertIn("From the scan of 2026-03-01 09:15", early_tree)
+
+        late_tree = self.text(contents_links[late_id])
+        self.assertIn("clip3.mov", late_tree)
+        self.assertNotIn("notes.txt", late_tree)
+        self.assertIn("From the scan of 2026-03-01 14:30", late_tree)
+
+        # Mid-day query before the second scan gets the first scan; bare day gets the end of the day.
+        midday = self.text(f"{self.url}?on=2026-03-01T12%3A00%3A00%2B08%3A00")
+        self.assertIn("notes.txt", midday)
+        self.assertNotIn("clip3.mov", midday)
+        eod = self.text(f"{self.url}?on=2026-03-01")
+        self.assertIn("clip3.mov", eod)
+        self.assertNotIn("notes.txt", eod)
+
+    def test_upload_form_defaults_to_now_in_manila_and_handles_offsets_and_bad_times(self):
+        manila = timezone(timedelta(hours=8))
+        before = datetime.now(manila)
+        html = self.text(self.url)
+        after = datetime.now(manila)
+        match = re.search(
+            r'<input[^>]*name="captured_on"[^>]*type="datetime-local"[^>]*value="([^"]*)"', html
+        )
+        if match is None:
+            match = re.search(
+                r'<input[^>]*type="datetime-local"[^>]*name="captured_on"[^>]*value="([^"]*)"',
+                html,
+            )
+        self.assertIsNotNone(match, html)
+        assert match is not None
+        default_val = match.group(1)
+        self.assertRegex(default_val, r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$")
+        allowed = {
+            before.strftime("%Y-%m-%dT%H:%M"),
+            after.strftime("%Y-%m-%dT%H:%M"),
+        }
+        self.assertIn(default_val, allowed)
+
+        # UTC offset timestamp is normalized to Manila; naive datetime-local gets +08:00.
+        self.assertEqual(self.upload(FIRST, on="2026-03-01T01:30:00+00:00").status_code, 303)
+        self.assertEqual(self.upload(SECOND, on="2026-03-01T14:45").status_code, 303)
+        page = self.text(self.url)
+        self.assertIn("2026-03-01 09:30", page)
+        self.assertIn("2026-03-01 14:45", page)
+
+        # Refuses scan at or before latest instant on the same day.
+        for earlier in ("2026-03-01T14:45", "2026-03-01T14:00:00+08:00"):
+            with self.subTest(earlier=earlier):
+                refused = self.upload(FIRST, on=earlier)
+                self.assertEqual(refused.status_code, 400)
+                self.assertIn("already scanned", refused.get_data(as_text=True))
+
+        # Invalid upload timestamp or missing offset on ?on= returns 400 cleanly.
+        self.assertEqual(self.upload(FIRST, on="not-a-date").status_code, 400)
+        self.assertEqual(self.web.get(f"{self.url}?on=2026-03-01T14:30").status_code, 400)
 
 
 if __name__ == "__main__":

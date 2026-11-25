@@ -7,13 +7,13 @@
 <div class="stack">
 <section class="card">
 <h2>Scans</h2>
-{% if snapshots %}<ul class="scans">{% for s in snapshots %}<li data-snapshot-id="{{ s.id }}"><strong>{{ s.captured_on }}</strong> <span class="muted">{{ s.entry_count }} entries, {{ s.total_bytes }} bytes, from {{ s.root_path }}</span> <a href="/drive/{{ d.id }}/catalog?diff={{ s.id }}">What changed</a> &middot; <a href="/drive/{{ d.id }}/catalog?on={{ s.captured_on }}">Contents</a></li>{% endfor %}</ul>
+{% if snapshots %}<ul class="scans">{% for s in snapshots %}<li data-snapshot-id="{{ s.id }}"><strong>{{ format_scan_time(s.captured_on) }}</strong> <span class="muted">{{ s.entry_count }} entries, {{ s.total_bytes }} bytes, from {{ s.root_path }}</span> <a href="/drive/{{ d.id }}/catalog?diff={{ s.id }}">What changed</a> &middot; <a href="/drive/{{ d.id }}/catalog?on={{ s.captured_on|urlencode }}">Contents</a></li>{% endfor %}</ul>
 {% else %}<p class="empty-title">No scans yet.</p><p class="muted">Upload the first scan below.</p>{% endif %}
 </section>
 <section class="card">
 <h2>What the Drive held on a date</h2>
 <form method="get" class="filters">
-<div class="field"><label for="c-on">Date</label><input id="c-on" name="on" type="date" value="{{ on }}" required></div>
+<div class="field"><label for="c-on">Date</label><input id="c-on" name="on" type="date" value="{{ on_date }}" required></div>
 <div class="field"><label for="c-prefix">Folder (optional)</label><input id="c-prefix" name="prefix" value="{{ prefix }}"></div>
 <div class="field field--action"><button class="btn btn--primary">Show contents</button></div>
 </form>
@@ -26,7 +26,7 @@
 <form method="post" enctype="multipart/form-data">
 {% include "_hidden.html" %}
 <div class="fields">
-<div class="field"><label for="u-date">Scan date</label><input id="u-date" name="captured_on" type="date" value="{{ today }}" required></div>
+<div class="field"><label for="u-date">Scan date and time</label><input id="u-date" name="captured_on" type="datetime-local" value="{{ now }}" required></div>
 <div class="field"><label for="u-root">Scanned folder or volume</label><input id="u-root" name="root_path" value="/"></div>
 <div class="field field--wide"><label for="u-file">Manifest file</label><input id="u-file" name="manifest" type="file" accept=".json,application/json" required></div>
 </div>
@@ -38,15 +38,15 @@
 {% if notice %}<div class="card empty"><p class="empty-title" role="status">{{ notice }}</p></div>{% endif %}
 {% if changes is not none %}
 <section class="card" id="changes">
-<h2>Changed by the scan of {{ snapshot.captured_on }}</h2>
+<h2>Changed by the scan of {{ format_scan_time(snapshot.captured_on) }}</h2>
 {% if changes %}<table class="catalog"><thead><tr><th>Change</th><th>Path</th><th>Size</th></tr></thead><tbody>{% for c in changes %}<tr class="change change--{{ c.change }}"><td>{{ c.change }}</td><td class="mono">{{ c.path }}</td><td>{{ '' if c.size_bytes is none else c.size_bytes }}</td></tr>{% endfor %}</tbody></table>
 {% else %}<p class="muted">Nothing changed in this scan.</p>{% endif %}
 </section>
 {% endif %}
 {% if tree is not none %}
 <section class="card" id="tree">
-<h2>Contents as of {{ on }}{% if prefix %} in {{ prefix }}{% endif %}</h2>
-<p class="muted">From the scan of {{ snapshot.captured_on }}. {{ tree_total }} entr{{ 'y' if tree_total == 1 else 'ies' }}{% if tree_total > tree|length %}; showing the first {{ tree|length }}, so name a folder to narrow it{% endif %}.</p>
+<h2>Contents as of {{ format_scan_time(on) }}{% if prefix %} in {{ prefix }}{% endif %}</h2>
+<p class="muted">From the scan of {{ format_scan_time(snapshot.captured_on) }}. {{ tree_total }} entr{{ 'y' if tree_total == 1 else 'ies' }}{% if tree_total > tree|length %}; showing the first {{ tree|length }}, so name a folder to narrow it{% endif %}.</p>
 {% if tree %}<table class="catalog"><thead><tr><th>Path</th><th>Kind</th><th>Size</th></tr></thead><tbody>{% for e in tree %}<tr><td class="mono">{{ e.path }}</td><td>{{ e.kind }}</td><td>{{ '' if e.size_bytes is none else e.size_bytes }}</td></tr>{% endfor %}</tbody></table>{% endif %}
 </section>
 {% endif %}

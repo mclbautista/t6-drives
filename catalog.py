@@ -7,7 +7,7 @@ last scan, and this screen reads those scans back, a scan's changes, or the whol
 import json
 import re
 from collections.abc import Callable
-from datetime import date
+from datetime import date, datetime, timedelta, timezone
 from typing import Any
 
 import segno
@@ -27,6 +27,8 @@ from glossary import looks_like_id
 # A scan of about 8,000 files is 1 to 2 MB of JSON. Every other form of this app stays at 64 KB.
 MANIFEST_BYTES = 12_000_000
 SHOWN = 1000  # rows of a tree shown at once; a folder prefix narrows it
+MANILA = timezone(timedelta(hours=8), "Asia/Manila")
+_BARE_DATE = re.compile(r"\d{4}-\d{2}-\d{2}")
 _CATALOG_POST = re.compile(r"/drive/[^/]+/catalog")
 _DRIVE_ID = re.compile(r"t6d_[0-9a-f]{32}")
 
@@ -47,6 +49,49 @@ def manifest_entries(raw: bytes) -> list[dict[str, Any]]:
     if not isinstance(entries, list) or not all(isinstance(entry, dict) for entry in entries):
         raise ValueError("The manifest must be a list of entries, each with a path and a kind.")
     return entries
+
+
+def validate_on(raw: str) -> None:
+    """Accept a bare YYYY-MM-DD date or an ISO 8601 timestamp with a UTC offset."""
+    if _BARE_DATE.fullmatch(raw):
+        date.fromisoformat(raw)
+        return
+    parsed = datetime.fromisoformat(raw)
+    if parsed.tzinfo is None or parsed.utcoffset() is None:
+        raise ValueError("missing UTC offset")
+
+
+def normalize_captured_on(raw: str) -> str:
+    """Normalize an uploaded scan time: bare YYYY-MM-DD stays a date; naive datetime gets Manila +08:00."""
+    value = raw.strip()
+    if not value:
+        raise ValueError("Enter the scan date and time.")
+    if _BARE_DATE.fullmatch(value):
+        try:
+            date.fromisoformat(value)
+        except ValueError:
+            raise ValueError("Enter the scan date and time.") from None
+        return value
+    try:
+        parsed = datetime.fromisoformat(value)
+    except ValueError:
+        raise ValueError("Enter the scan date and time.") from None
+    if parsed.tzinfo is None or parsed.utcoffset() is None:
+        parsed = parsed.replace(tzinfo=MANILA)
+    return parsed.isoformat()
+
+
+def format_scan_time(value: str) -> str:
+    """Show a scan timestamp in Manila time as 'YYYY-MM-DD HH:MM' (with ':SS' when non-zero); bare dates stay 'YYYY-MM-DD'."""
+    if _BARE_DATE.fullmatch(value):
+        return value
+    try:
+        parsed = datetime.fromisoformat(value)
+    except ValueError:
+        return value
+    if parsed.tzinfo is not None and parsed.utcoffset() is not None:
+        parsed = parsed.astimezone(MANILA)
+    return parsed.strftime("%Y-%m-%d %H:%M:%S" if parsed.second else "%Y-%m-%d %H:%M")
 
 
 def register_catalog(app: Flask, gateway: Gateway, csrf: Callable[[], str]) -> None:
@@ -99,6 +144,7 @@ def register_catalog(app: Flask, gateway: Gateway, csrf: Callable[[], str]) -> N
             "drive_catalog_snapshots", DriveCatalogSnapshotsInput(drive=drive_id)
         )["snapshots"]
         on = request.args.get("on", "").strip()
+        on_date = ""
         prefix = request.args.get("prefix", "").strip()
         changes = tree = snapshot = None
         notice = None
@@ -113,10 +159,11 @@ def register_catalog(app: Flask, gateway: Gateway, csrf: Callable[[], str]) -> N
             snapshot, changes = found["snapshot"], found["changes"]
         elif on:
             try:
-                date.fromisoformat(on)
+                validate_on(on)
             except ValueError:
-                error = error or "Enter the date as YYYY-MM-DD."
+                error = error or "Enter the date as YYYY-MM-DD or an ISO timestamp with UTC offset."
             else:
+                on_date = on[:10]
                 try:
                     found = gateway.read(
                         "drive_catalog_at",
@@ -126,12 +173,13 @@ def register_catalog(app: Flask, gateway: Gateway, csrf: Callable[[], str]) -> N
                 except ApiRefused as refused:
                     if refused.rule != "snapshot":
                         raise
-                    notice = f"This Drive had not been scanned by {on}."
+                    notice = f"This Drive had not been scanned by {format_scan_time(on)}."
         return render_template(
             "catalog.html",
             d=drive,
             snapshots=list(reversed(snapshots)),
             on=on,
+            on_date=on_date,
             prefix=prefix,
             snapshot=snapshot,
             changes=changes,
@@ -139,7 +187,8 @@ def register_catalog(app: Flask, gateway: Gateway, csrf: Callable[[], str]) -> N
             tree_total=len(tree) if tree is not None else 0,
             notice=notice,
             error=error,
-            today=date.today().isoformat(),
+            now=datetime.now(MANILA).strftime("%Y-%m-%dT%H:%M"),
+            format_scan_time=format_scan_time,
             csrf=csrf(),
             new_key=new_key,
         )
@@ -156,11 +205,12 @@ def register_catalog(app: Flask, gateway: Gateway, csrf: Callable[[], str]) -> N
             return catalog_page(drive_id, "Choose the manifest file of the scan."), 400
         try:
             entries = manifest_entries(upload.read())
+            captured_on = normalize_captured_on(form.get("captured_on", ""))
         except ValueError as error:
             return catalog_page(drive_id, str(error)), 400
         values = {
             "drive": drive_id,
-            "captured_on": form.get("captured_on", "").strip(),
+            "captured_on": captured_on,
             "root_path": form.get("root_path", "").strip() or "/",
             "entries": entries,
         }

@@ -261,6 +261,11 @@ class HelperMacOSE2ETests(DriveAppCase):
         vol: Path,
         env: dict[str, str],
     ) -> tuple[dict[str, Any], subprocess.CompletedProcess[str]]:
+        # captured_on has one-second precision and t6 refuses a scan that is not later than
+        # the Drive's last one, so two scans in the same second would flake.
+        last = getattr(self, "_last_scan_second", None)
+        while last is not None and int(time.time()) <= last:
+            time.sleep(0.05)
         scan_proc = subprocess.run(
             [str(HELPER_DIR / "t6-drive-scan"), str(vol)],
             env=env,
@@ -268,6 +273,7 @@ class HelperMacOSE2ETests(DriveAppCase):
             text=True,
             check=False,
         )
+        self._last_scan_second = int(time.time())
         self.assertEqual(scan_proc.returncode, 0, f"scan failed: {scan_proc.stderr}")
         scan_doc = json.loads(scan_proc.stdout)
         send_proc = subprocess.run(

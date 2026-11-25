@@ -124,16 +124,16 @@ if [[ -z "$max_bytes" || "$max_bytes" == *[!0-9]* ]]; then
 fi
 
 file_byte_size() {
-  local path="$1"
+  local file_path="$1"
   local sz
-  sz=$(wc -c < "$path")
+  sz=$(wc -c < "$file_path")
   print -r -- "${sz//[[:space:]]/}"
 }
 
 check_max_bytes() {
-  local path="$1"
+  local file_path="$1"
   local sz
-  sz=$(file_byte_size "$path")
+  sz=$(file_byte_size "$file_path")
   if (( sz > max_bytes )); then
     print -u2 "t6-drive-send: too_large ($sz > $max_bytes bytes)"
     exit 13

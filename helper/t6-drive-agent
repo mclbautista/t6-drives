@@ -96,9 +96,9 @@ log_event() {
 }
 
 file_byte_size() {
-  local path="$1"
+  local file_path="$1"
   local sz
-  sz=$(wc -c < "$path")
+  sz=$(wc -c < "$file_path")
   print -r -- "${sz//[[:space:]]/}"
 }
 

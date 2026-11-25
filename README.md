@@ -42,6 +42,7 @@ Check: open it from another office machine, which works; a request whose `Host` 
 | Project use on the Drive page | `drive assign` (with remarks), `drive unassign` (by Assignment number, so one whose Project is text only can be ended) |
 | `/drive/<id>/qr`, `/qr/<code or id>` | `drive get`, `drive find`, `drive edit` (a printable QR label of the Drive's code; scanning it opens the Drive). A QR code is optional and is not on the forms: the "Add QR" button sets it equal to the Drive's ID, and a T6-owned Drive shows its label with no setup. |
 | `/drive/<id>/catalog` | `drive catalog-snapshots`, `drive catalog-diff`, `drive catalog-at` (scans, what each changed, the contents on a date with `?on=YYYY-MM-DD`), and `drive catalog-snapshot` (upload a JSON manifest) |
+| `POST /helper/catalog` | `drive find`, `drive list`, `drive catalog-snapshot` (JSON endpoint for the custodian Mac helper, authenticated with `DRIVES_HELPER_TOKEN`) |
 | `/drive/<id>/retire` | `drive retire` |
 | `/drive/<id>/custody` (legacy direct URL) | `drive receive`, `drive return`, `drive retire` |
 | `/shipments/new` | `drive release` (with a reason and a free-text recipient) |
@@ -75,7 +76,17 @@ The page tests use a synthetic HTTP API (`tests/support.py`), backed by t6's rea
 
 t6 is pinned to core main commit `9b1d673668e164dab3fd36834fe28ec6892f957b` in the dependency files.
 
-A scan manifest of about 8,000 files is 1 to 2 MB, so only `POST /drive/<id>/catalog` accepts a body up to 12 MB (every other form stays at 64 KB, and the Host, Origin and CSRF checks run first). A scan the API cannot take is not queued, because the Outbox page would print the whole manifest; the page says the API is unavailable, and uploading again is the same write. The app waits up to 60 seconds for the API to save a scan. The t6 API accepts that large request on its tailnet listener only.
+A scan manifest of about 8,000 files is 1 to 2 MB, so only `POST /drive/<id>/catalog` and `POST /helper/catalog` accept a body up to 12 MB (every other form stays at 64 KB, and the Host check runs first, plus Origin and CSRF on browser forms). A scan the API cannot take is not queued, because the Outbox page would print the whole manifest; the page says the API is unavailable, and uploading again is the same write. The app waits up to 60 seconds for the API to save a scan. The t6 API accepts that large request on its tailnet listener only.
+
+## Helper endpoint
+
+`POST /helper/catalog` accepts JSON scan uploads from the custodian Mac helper outside the browser form flow (no CSRF form token, session cookie, or `Origin` check; the `Host` check and 12 MB limit still apply):
+
+- Set `DRIVES_HELPER_TOKEN` in the runtime environment. When empty, `POST /helper/catalog` answers `404` like an unknown route.
+- Authenticate with `X-Helper-Token: <token>` or `Authorization: Bearer <token>` (`401` `{"status": "unauthorized", ...}` on missing or wrong token).
+- Request JSON: `serial` (optional), `volume_name`, `label` (optional typed label), `captured_on` (ISO 8601 timestamp with UTC offset), `root_path` (defaults to `volume_name` or `"/"`), `entries` (`path`, `kind`, `size_bytes` or `size` on `file` entries, optional `mtime` and `checksum`), `mode` (`"preview"` or `"save"`), and optional `idempotency_key`.
+- Matching order: (1) `drive find` by `serial` (accepted match, or unique suspected match), (2) `volume_name` matching a unique Drive's open Project use label, (3) `label` matching a unique Drive's open Project use label. Ambiguous or missing matches return `422` `{"status": "no_drive", ...}`.
+- Responses: `200` `{"status": "preview"|"saved", "drive": {"id", "label"}, "added", "modified", "removed", "entry_count", "total_bytes", "catalog_url"}`, `400` `{"status": "invalid", ...}`, `409` `{"status": "never", "rule": "catalog_order", ...}` for older/equal scans, and `503` `{"status": "try_later", ...}` when the API is down (never queued in the Outbox).
 
 A refusal for a step that cannot follow the last custody step (rule `custody`), or for an edit of a Drive that changed (`drive_changed`), is answered 409 and shown to the person; it is never queued or sent again.
 

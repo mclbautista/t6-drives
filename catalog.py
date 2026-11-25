@@ -6,22 +6,29 @@ last scan, and this screen reads those scans back, a scan's changes, or the whol
 
 import json
 import re
+import secrets
 from collections.abc import Callable
 from datetime import date, datetime, timedelta, timezone
 from typing import Any
 
 import segno
 from flask import Flask, abort, redirect, render_template, request
+from t6.drives import catalog_entries
 from t6.verbs import (
+    Done,
     DriveCatalogAtInput,
     DriveCatalogDiffInput,
     DriveCatalogSnapshotsInput,
     DriveFindInput,
     DriveGetInput,
+    DriveListInput,
+    Outcome,
+    Preview,
+    Refused,
 )
 
 from forms import finish, new_key, notice, posted_key
-from gateway import ApiRefused, Gateway
+from gateway import ApiRefused, ApiUnavailable, Gateway, Queued, describe
 from glossary import looks_like_id
 
 # A scan of about 8,000 files is 1 to 2 MB of JSON. Every other form of this app stays at 64 KB.
@@ -34,8 +41,8 @@ _DRIVE_ID = re.compile(r"t6d_[0-9a-f]{32}")
 
 
 def allow_manifest(path: str) -> None:
-    """Raise the body limit for the one route that takes a manifest; call it before the form is read."""
-    if _CATALOG_POST.fullmatch(path):
+    """Raise the body limit for the routes that take a manifest; call it before the body is read."""
+    if _CATALOG_POST.fullmatch(path) or path == "/helper/catalog":
         request.max_content_length = MANIFEST_BYTES
 
 
@@ -94,7 +101,139 @@ def format_scan_time(value: str) -> str:
     return parsed.strftime("%Y-%m-%d %H:%M:%S" if parsed.second else "%Y-%m-%d %H:%M")
 
 
-def register_catalog(app: Flask, gateway: Gateway, csrf: Callable[[], str]) -> None:
+def _provided_helper_token() -> str:
+    header = (request.headers.get("X-Helper-Token") or "").strip()
+    if header:
+        return header
+    auth = request.headers.get("Authorization", "")
+    scheme, _, rest = auth.partition(" ")
+    if scheme.lower() == "bearer":
+        return rest.strip()
+    return ""
+
+
+def _optional_str(payload: dict[str, Any], field: str) -> str:
+    value = payload.get(field)
+    if value is None:
+        return ""
+    if not isinstance(value, str):
+        raise TypeError(f"{field} must be a string.")
+    return value.strip()
+
+
+def _helper_captured_on(payload: dict[str, Any]) -> str:
+    raw = payload.get("captured_on")
+    if not isinstance(raw, str) or not raw.strip():
+        raise ValueError("captured_on must be an ISO 8601 timestamp with UTC offset.")
+    value = raw.strip()
+    if _BARE_DATE.fullmatch(value):
+        raise ValueError("captured_on must include a time and UTC offset.")
+    try:
+        parsed = datetime.fromisoformat(value)
+    except ValueError:
+        raise ValueError("captured_on must be an ISO 8601 timestamp with UTC offset.") from None
+    if parsed.tzinfo is None or parsed.utcoffset() is None:
+        raise ValueError("captured_on must include a UTC offset.")
+    return parsed.isoformat()
+
+
+def _helper_entries(payload: dict[str, Any]) -> list[dict[str, Any]]:
+    raw = payload.get("entries")
+    if not isinstance(raw, list):
+        raise TypeError("entries must be a list of entry objects.")
+    cleaned: list[dict[str, Any]] = []
+    for item in raw:
+        if not isinstance(item, dict):
+            raise TypeError("Each entry must be a JSON object.")
+        path = item.get("path")
+        kind = item.get("kind")
+        if not isinstance(path, str) or kind not in ("file", "dir"):
+            raise ValueError("Each entry must have a string path and kind ('file' or 'dir').")
+        entry: dict[str, Any] = {"path": path, "kind": kind}
+        if kind == "file":
+            if "size_bytes" in item:
+                size_bytes = item["size_bytes"]
+            elif "size" in item:
+                size_bytes = item["size"]
+            else:
+                raise ValueError("Each file entry must include size_bytes.")
+            if not isinstance(size_bytes, int) or isinstance(size_bytes, bool) or size_bytes < 0:
+                raise ValueError("size_bytes must be a non-negative integer.")
+            entry["size_bytes"] = size_bytes
+        elif item.get("size_bytes") is not None:
+            raise ValueError("Directory entries cannot include size_bytes.")
+        for optional in ("mtime", "checksum"):
+            value = item.get(optional)
+            if value is not None:
+                if not isinstance(value, str):
+                    raise ValueError(f"{optional} must be a string.")
+                entry[optional] = value
+        cleaned.append(entry)
+    catalog_entries(cleaned)
+    return cleaned
+
+
+def _parse_helper_payload(raw: bytes) -> dict[str, Any]:
+    try:
+        payload = json.loads(raw)
+    except (UnicodeDecodeError, ValueError):
+        raise ValueError("Request body must be valid JSON.") from None
+    if not isinstance(payload, dict):
+        raise TypeError("Request body must be a JSON object.")
+    mode = payload.get("mode")
+    if mode not in ("preview", "save"):
+        raise ValueError("mode must be 'preview' or 'save'.")
+    serial = _optional_str(payload, "serial")
+    volume_name = _optional_str(payload, "volume_name")
+    label = _optional_str(payload, "label")
+    root_path = _optional_str(payload, "root_path") or volume_name or "/"
+    captured_on = _helper_captured_on(payload)
+    entries = _helper_entries(payload)
+    key = _optional_str(payload, "idempotency_key") or new_key()
+    return {
+        "mode": mode,
+        "serial": serial,
+        "volume_name": volume_name,
+        "label": label,
+        "root_path": root_path,
+        "captured_on": captured_on,
+        "entries": entries,
+        "key": key,
+    }
+
+
+def _match_helper_drive(
+    gateway: Gateway, serial: str, volume_name: str, label: str
+) -> dict[str, Any] | None:
+    if serial:
+        matches = gateway.read("drive_find", DriveFindInput(serial=serial))["matches"]
+        accepted = [m for m in matches if m.get("match") == "accepted"]
+        if accepted:
+            return dict(accepted[0])
+        suspected = [m for m in matches if m.get("match") == "suspected"]
+        if len(suspected) == 1:
+            return dict(suspected[0])
+    candidates = [c for c in (volume_name, label) if c]
+    if candidates:
+        drives = gateway.read("drive_list", DriveListInput())["drives"]
+        for candidate in candidates:
+            needle = candidate.casefold()
+            matched = [
+                d
+                for d in drives
+                if any(
+                    a.get("open", True) and (a.get("label") or "").strip().casefold() == needle
+                    for a in d.get("open_assignments", ())
+                )
+            ]
+            if len(matched) == 1:
+                return dict(matched[0])
+    return None
+
+
+def register_catalog(
+    app: Flask, gateway: Gateway, csrf: Callable[[], str], *, helper_token: str = ""
+) -> None:
     @app.get("/drive/<drive_id>/qr")
     def qr_label(drive_id: str):
         drive = gateway.read("drive_get", DriveGetInput(drive=drive_id))["drive"]
@@ -220,3 +359,88 @@ def register_catalog(app: Flask, gateway: Gateway, csrf: Callable[[], str]) -> N
             lambda done: f"/drive/{drive_id}/catalog",
             lambda error: catalog_page(drive_id, error),
         )
+
+    if helper_token:
+
+        @app.post("/helper/catalog")
+        def helper_catalog():
+            provided = _provided_helper_token()
+            if not provided or not secrets.compare_digest(
+                provided.encode("utf-8"), helper_token.encode("utf-8")
+            ):
+                return {"status": "unauthorized", "reason": "Missing or invalid helper token."}, 401
+            try:
+                parsed = _parse_helper_payload(request.get_data())
+            except (ValueError, TypeError) as error:
+                return {"status": "invalid", "reason": str(error)}, 400
+            try:
+                drive = _match_helper_drive(
+                    gateway, parsed["serial"], parsed["volume_name"], parsed["label"]
+                )
+                if drive is None:
+                    return {"status": "no_drive", "reason": "No matching Drive found."}, 422
+                drive_id = str(drive["id"])
+                drive_label = str(drive.get("label") or "")
+                values = {
+                    "drive": drive_id,
+                    "captured_on": parsed["captured_on"],
+                    "root_path": parsed["root_path"],
+                    "entries": parsed["entries"],
+                }
+                catalog_url = request.host_url + f"drive/{drive_id}/catalog"
+                outcome: Outcome | Queued
+                if parsed["mode"] == "preview":
+                    outcome = gateway.preview("drive_catalog_snapshot", values, parsed["key"])
+                    if isinstance(outcome, Preview):
+                        plan = outcome.plan
+                        return {
+                            "status": "preview",
+                            "drive": {"id": drive_id, "label": drive_label},
+                            "added": plan["added"],
+                            "modified": plan["modified"],
+                            "removed": plan["removed"],
+                            "entry_count": plan["entry_count"],
+                            "total_bytes": plan["total_bytes"],
+                            "catalog_url": catalog_url,
+                        }, 200
+                else:
+                    outcome = gateway.submit("drive_catalog_snapshot", values, parsed["key"])
+                    if isinstance(outcome, Done):
+                        result = outcome.result
+                        return {
+                            "status": "saved",
+                            "drive": {"id": drive_id, "label": drive_label},
+                            "added": result["added"],
+                            "modified": result["modified"],
+                            "removed": result["removed"],
+                            "entry_count": result["entry_count"],
+                            "total_bytes": result["total_bytes"],
+                            "catalog_url": catalog_url,
+                        }, 200
+            except ApiUnavailable:
+                return {
+                    "status": "try_later",
+                    "reason": "The t6 API is unavailable; try again later.",
+                }, 503
+            except ApiRefused as refused:
+                return {"status": "invalid", "rule": refused.rule, "reason": refused.reason}, 400
+
+            if isinstance(outcome, Refused):
+                if outcome.rule == "catalog_order":
+                    return {
+                        "status": "never",
+                        "rule": "catalog_order",
+                        "reason": outcome.reason,
+                    }, 409
+                status_code = 409 if outcome.rule in ("custody", "drive_changed") else 400
+                return {
+                    "status": "invalid",
+                    "rule": outcome.rule,
+                    "reason": outcome.reason,
+                }, status_code
+            reason = (
+                "The t6 API gave an answer this app cannot use."
+                if isinstance(outcome, Queued)
+                else describe(outcome)
+            )
+            return {"status": "invalid", "rule": "unexpected", "reason": reason}, 400

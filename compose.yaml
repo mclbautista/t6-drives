@@ -12,6 +12,7 @@ services:
       T6_API_SECRET: ${T6_API_SECRET:?Set the t6 API secret bound to the custodian}
       DRIVES_SESSION_SECRET: ${DRIVES_SESSION_SECRET:?Set a private runtime secret}
       DRIVES_ALLOWED_HOST: ${DRIVES_ALLOWED_HOST:-}
+      DRIVES_HELPER_TOKEN: ${DRIVES_HELPER_TOKEN:-}
     volumes:
       - drives_data:/data
     read_only: true

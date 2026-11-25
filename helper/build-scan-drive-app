@@ -1,0 +1,11 @@
+#!/bin/zsh
+set -euo pipefail
+
+script_dir="${0:A:h}"
+out_app="${1:-$script_dir/Scan Drive.app}"
+
+rm -rf "$out_app"
+osacompile -o "$out_app" "$script_dir/Scan Drive.applescript"
+cp "$script_dir/t6-drive-scan" "$out_app/Contents/Resources/t6-drive-scan"
+cp "$script_dir/t6-drive-send" "$out_app/Contents/Resources/t6-drive-send"
+chmod 755 "$out_app/Contents/Resources/t6-drive-scan" "$out_app/Contents/Resources/t6-drive-send"

@@ -1,0 +1,316 @@
+#!/bin/zsh
+set -euo pipefail
+
+trim_ws() {
+  local s="$1"
+  while [[ "$s" == [[:space:]]* ]]; do s="${s#[[:space:]]}"; done
+  while [[ "$s" == *[[:space:]] ]]; do s="${s%[[:space:]]}"; done
+  print -r -- "$s"
+}
+
+strip_quotes() {
+  local s="$1"
+  if [[ ${#s} -ge 2 ]]; then
+    if [[ ( "$s" == \"*\" ) || ( "$s" == \'*\' ) ]]; then
+      s="${s:1:-1}"
+    fi
+  fi
+  print -r -- "$s"
+}
+
+config_file="${T6_HELPER_CONFIG:-/Library/Application Support/t6-drives-helper/config}"
+if [[ ! -r "$config_file" ]]; then
+  print -u2 "t6-drive-send: config file not readable: $config_file"
+  exit 1
+fi
+
+url=""
+token=""
+confirm="ask"
+
+while IFS= read -r raw_line || [[ -n "$raw_line" ]]; do
+  line="${raw_line//$'\r'/}"
+  line=$(trim_ws "$line")
+  [[ -z "$line" || "$line" == \#* ]] && continue
+  if [[ "$line" != *=* ]]; then
+    print -u2 "t6-drive-send: invalid config line: $line"
+    exit 1
+  fi
+  key=$(trim_ws "${line%%=*}")
+  val=$(trim_ws "${line#*=}")
+  val=$(strip_quotes "$val")
+  case "$key" in
+    (url) url="${val%/}" ;;
+    (token) token="$val" ;;
+    (confirm) confirm="$val" ;;
+    (*)
+      print -u2 "t6-drive-send: unknown config key: $key"
+      exit 1
+      ;;
+  esac
+done < "$config_file"
+
+if [[ -z "$url" || -z "$token" ]]; then
+  print -u2 "t6-drive-send: config must set url and token"
+  exit 1
+fi
+if [[ "$confirm" != "ask" && "$confirm" != "silent" ]]; then
+  print -u2 "t6-drive-send: config confirm must be 'ask' or 'silent', got '$confirm'"
+  exit 1
+fi
+
+work_dir=$(mktemp -d "${TMPDIR:-/tmp}/t6-send.XXXXXX")
+trap 'rm -rf "$work_dir"' EXIT
+
+if [[ $# -gt 1 ]]; then
+  print -u2 "Usage: t6-drive-send [scan.json | -]"
+  exit 2
+fi
+
+if [[ $# -eq 1 && "$1" != "-" ]]; then
+  if [[ ! -r "$1" ]]; then
+    print -u2 "t6-drive-send: scan file not readable: $1"
+    exit 1
+  fi
+  scan_file="$1"
+else
+  scan_file="$work_dir/scan.json"
+  cat > "$scan_file"
+fi
+
+payload_js="$work_dir/build_payload.js"
+field_js="$work_dir/json_field.js"
+label_dialog_js="$work_dir/dialog_label.js"
+confirm_dialog_js="$work_dir/dialog_confirm.js"
+
+cat <<'JXA' > "$payload_js"
+ObjC.import("Foundation");
+
+function run(argv) {
+  var scanPath = argv[0];
+  var outPath = argv[1];
+  var mode = argv[2];
+  var key = argv[3];
+  var label = argv[4] || "";
+
+  var nsRaw = $.NSString.stringWithContentsOfFileEncodingError(
+    scanPath,
+    $.NSUTF8StringEncoding,
+    null
+  );
+  if (!nsRaw) {
+    throw new Error("Could not read scan JSON.");
+  }
+  var scan = JSON.parse(ObjC.unwrap(nsRaw));
+  var payload = {
+    serial: scan.serial || "",
+    volume_name: scan.volume_name || "",
+    label: label,
+    captured_on: scan.captured_on,
+    root_path: scan.root_path || scan.volume_name || "/",
+    entries: scan.entries || [],
+    mode: mode,
+    idempotency_key: key
+  };
+  var jsonStr = $(JSON.stringify(payload));
+  if (!jsonStr.writeToFileAtomicallyEncodingError(outPath, true, $.NSUTF8StringEncoding, null)) {
+    throw new Error("Could not write payload JSON.");
+  }
+  return scan.volume_name || "";
+}
+JXA
+
+cat <<'JXA' > "$field_js"
+ObjC.import("Foundation");
+
+function run(argv) {
+  var path = argv[0];
+  var field = argv[1];
+  var nsRaw = $.NSString.stringWithContentsOfFileEncodingError(
+    path,
+    $.NSUTF8StringEncoding,
+    null
+  );
+  if (!nsRaw) return "";
+  var data;
+  try {
+    data = JSON.parse(ObjC.unwrap(nsRaw));
+  } catch (e) {
+    return "";
+  }
+  if (!data || typeof data !== "object") return "";
+  if (field === "drive_label") {
+    return data.drive && data.drive.label != null ? String(data.drive.label) : "";
+  }
+  var val = data[field];
+  return val != null ? String(val) : "";
+}
+JXA
+
+cat <<'JXA' > "$label_dialog_js"
+function run(argv) {
+  var app = Application.currentApplication();
+  app.includeStandardAdditions = true;
+  var res = app.displayDialog(
+    "No Drive matched \"" + argv[0] + "\". Enter the Drive label:",
+    {
+      defaultAnswer: "",
+      buttons: ["Cancel", "OK"],
+      defaultButton: "OK",
+      withTitle: "Scan Drive"
+    }
+  );
+  return res.textReturned;
+}
+JXA
+
+cat <<'JXA' > "$confirm_dialog_js"
+function run(argv) {
+  var app = Application.currentApplication();
+  app.includeStandardAdditions = true;
+  app.displayDialog(
+    "Save scan to \"" + argv[0] + "\"?\n\n" +
+    "Added: " + argv[1] + "\n" +
+    "Modified: " + argv[2] + "\n" +
+    "Removed: " + argv[3],
+    {
+      buttons: ["Cancel", "Save"],
+      defaultButton: "Save",
+      withTitle: "Scan Drive"
+    }
+  );
+  return "Save";
+}
+JXA
+
+build_payload() {
+  local mode="$1"
+  local key="$2"
+  local label="$3"
+  local out_file="$4"
+  osascript -l JavaScript "$payload_js" "$scan_file" "$out_file" "$mode" "$key" "$label"
+}
+
+json_field() {
+  local json_path="$1"
+  local field="$2"
+  osascript -l JavaScript "$field_js" "$json_path" "$field"
+}
+
+post_payload() {
+  local payload_file="$1"
+  local response_file="$2"
+  curl -sS -o "$response_file" -w '%{http_code}' \
+    -H 'Content-Type: application/json' \
+    -H "X-Helper-Token: $token" \
+    --data-binary @"$payload_file" \
+    "$url/helper/catalog"
+}
+
+run_dialog() {
+  if [[ -n "${T6_HELPER_DIALOG_CMD:-}" ]]; then
+    if [[ -x "$T6_HELPER_DIALOG_CMD" ]]; then
+      "$T6_HELPER_DIALOG_CMD" "$@"
+    else
+      eval "$T6_HELPER_DIALOG_CMD \"\$@\""
+    fi
+    return $?
+  fi
+
+  local kind="$1"
+  if [[ "$kind" == "label" ]]; then
+    osascript -l JavaScript "$label_dialog_js" "$2"
+  elif [[ "$kind" == "confirm" ]]; then
+    osascript -l JavaScript "$confirm_dialog_js" "$2" "$3" "$4" "$5"
+  else
+    print -u2 "t6-drive-send: unknown dialog mode: $kind"
+    return 2
+  fi
+}
+
+run_open() {
+  local target_url="$1"
+  if [[ -n "${T6_HELPER_OPEN_CMD:-}" ]]; then
+    if [[ -x "$T6_HELPER_OPEN_CMD" ]]; then
+      "$T6_HELPER_OPEN_CMD" "$target_url"
+    else
+      eval "$T6_HELPER_OPEN_CMD \"\$target_url\""
+    fi
+  else
+    open "$target_url"
+  fi
+}
+
+idempotency_key=$(uuidgen | tr '[:upper:]' '[:lower:]')
+payload_file="$work_dir/payload.json"
+response_file="$work_dir/response.json"
+
+if [[ "$confirm" == "silent" ]]; then
+  build_payload "save" "$idempotency_key" "" "$payload_file" >/dev/null
+  http_code=$(post_payload "$payload_file" "$response_file")
+  resp_status=$(json_field "$response_file" "status")
+  if [[ "$http_code" == "200" && "$resp_status" == "saved" ]]; then
+    exit 0
+  fi
+  reason=$(json_field "$response_file" "reason")
+  print -u2 "t6-drive-send: ${reason:-HTTP $http_code}"
+  exit 1
+fi
+
+volume_name=$(build_payload "preview" "$idempotency_key" "" "$payload_file")
+http_code=$(post_payload "$payload_file" "$response_file")
+resp_status=$(json_field "$response_file" "status")
+typed_label=""
+
+if [[ "$http_code" == "422" || "$resp_status" == "no_drive" ]]; then
+  if ! typed_label=$(run_dialog "label" "$volume_name"); then
+    print -u2 "Canceled."
+    exit 0
+  fi
+  typed_label=$(trim_ws "${typed_label//$'\r'/}")
+  if [[ -z "$typed_label" ]]; then
+    print -u2 "Canceled."
+    exit 0
+  fi
+  build_payload "preview" "$idempotency_key" "$typed_label" "$payload_file" >/dev/null
+  http_code=$(post_payload "$payload_file" "$response_file")
+  resp_status=$(json_field "$response_file" "status")
+fi
+
+if [[ "$http_code" != "200" || "$resp_status" != "preview" ]]; then
+  reason=$(json_field "$response_file" "reason")
+  print -u2 "t6-drive-send: ${reason:-HTTP $http_code}"
+  exit 1
+fi
+
+drive_label=$(json_field "$response_file" "drive_label")
+added=$(json_field "$response_file" "added")
+modified=$(json_field "$response_file" "modified")
+removed=$(json_field "$response_file" "removed")
+preview_url=$(json_field "$response_file" "catalog_url")
+
+if ! confirm_answer=$(run_dialog "confirm" "$drive_label" "$added" "$modified" "$removed"); then
+  print -u2 "Canceled."
+  exit 0
+fi
+confirm_lower=$(trim_ws "${confirm_answer//$'\r'/}")
+if [[ "${confirm_lower:l}" == "cancel" ]]; then
+  print -u2 "Canceled."
+  exit 0
+fi
+
+build_payload "save" "$idempotency_key" "$typed_label" "$payload_file" >/dev/null
+http_code=$(post_payload "$payload_file" "$response_file")
+resp_status=$(json_field "$response_file" "status")
+
+if [[ "$http_code" != "200" || "$resp_status" != "saved" ]]; then
+  reason=$(json_field "$response_file" "reason")
+  print -u2 "t6-drive-send: ${reason:-HTTP $http_code}"
+  exit 1
+fi
+
+catalog_url=$(json_field "$response_file" "catalog_url")
+[[ -z "$catalog_url" ]] && catalog_url="$preview_url"
+if [[ -n "$catalog_url" ]]; then
+  run_open "$catalog_url"
+fi

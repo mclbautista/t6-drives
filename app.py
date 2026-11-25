@@ -22,9 +22,11 @@ from t6.verbs import (
     DriveInboxInput,
     DriveListInput,
     DriveOverdueInput,
+    DriveProjectMovementsInput,
     DriveProjectsInput,
     DriveReloadReportInput,
     MovementListInput,
+    PersonGetInput,
     Preview,
     Refused,
 )
@@ -316,13 +318,38 @@ def create_app(
         if found is None:
             abort(404)
         drives = gateway.read("drive_list", DriveListInput(project=project))["drives"]
-        movements = gateway.read("movement_list", MovementListInput(project=project))["movements"]
+        movements = gateway.read(
+            "drive_project_movements", DriveProjectMovementsInput(project=project)
+        )["movements"]
+        people: dict[str, str] = {}
+
+        def person_name(person: str | None) -> str:
+            if not person:
+                return "Unknown"
+            if not person.startswith("t6n_") and not re.fullmatch(r"[0-9a-fA-F-]{32,36}", person):
+                return person
+            if person not in people:
+                try:
+                    people[person] = (
+                        gateway.read("person_get", PersonGetInput(person_id=person))["person"][
+                            "name"
+                        ]
+                        or "Unknown"
+                    )
+                except ApiRefused as error:
+                    if error.rule not in {"person", "read"}:
+                        raise
+                    people[person] = "Unknown"
+            return people[person]
+
         return render_template(
             "project.html",
             project=found["project"],
             drives=drives,
-            movements=sorted(movements, key=lambda m: m["on"] or "", reverse=True),
+            movements=movements,
             display=gateway.project_display,
+            project_history=True,
+            person_name=person_name,
         )
 
     @app.get("/movements")
